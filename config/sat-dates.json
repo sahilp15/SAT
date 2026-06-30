@@ -1,0 +1,13 @@
+{
+  "_comment": "Single source of truth for upcoming SAT administration dates. Edit here (or later from the Settings page). Dates are ISO (YYYY-MM-DD), test day local. registrationDeadline is approximate; verify on collegeboard.org before relying on it.",
+  "dates": [
+    { "id": "2026-08", "label": "August 2026", "date": "2026-08-29", "registrationDeadline": "2026-08-14" },
+    { "id": "2026-09", "label": "September 2026", "date": "2026-09-12", "registrationDeadline": "2026-08-28" },
+    { "id": "2026-10", "label": "October 2026", "date": "2026-10-03", "registrationDeadline": "2026-09-18" },
+    { "id": "2026-11", "label": "November 2026", "date": "2026-11-07", "registrationDeadline": "2026-10-23" },
+    { "id": "2026-12", "label": "December 2026", "date": "2026-12-05", "registrationDeadline": "2026-11-20" },
+    { "id": "2027-03", "label": "March 2027", "date": "2027-03-13", "registrationDeadline": "2027-02-26" },
+    { "id": "2027-05", "label": "May 2027", "date": "2027-05-01", "registrationDeadline": "2027-04-16" },
+    { "id": "2027-06", "label": "June 2027", "date": "2027-06-05", "registrationDeadline": "2027-05-21" }
+  ]
+}
