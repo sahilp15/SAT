@@ -97,20 +97,63 @@ gate** (every field must be filled in thoughtfully) instead of AI quality review
 
 ## Importing your own SAT questions
 
-The importer targets **SAT Suite Question Bank** text/PDF exports.
+There are two importers. **For Math, use the vision importer** — it's the only
+reliable way to recover equations from the official PDFs.
 
-1. Put your files in `data/uploads/` (supported: `.pdf` and `.txt`).
-2. Run the importer:
+### Why: the official PDFs store math as images
 
-   ```bash
-   npm run import:dry   # parse + write data/imported/*.json + print a report (no DB writes)
-   npm run import       # parse and load into the database (idempotent by question id)
-   ```
+In the SAT Question Bank PDFs, equations, answer choices, and figures are rendered
+as **images, not text**. Plain text extraction therefore loses ~87% of math answer
+choices and most inline equations (measured on the Math file). No text parser can
+fix that — the math was never text.
 
-3. Open **Import & Review** (`/admin/import`) in the app. Items the parser couldn’t
-   fully trust — math rendered as images, missing answer choices, or figures that
-   didn’t extract as text — are flagged **NEEDS_REVIEW**. Fix them with the live
-   KaTeX preview editor and mark them reviewed. Only `OK` items appear in practice.
+### Recommended: vision importer (accurate LaTeX)
+
+Renders each PDF page to an image and uses an OpenAI **vision** model to transcribe
+questions into clean structured JSON with LaTeX math, choices, correct answers, and
+explanations. Requires `OPENAI_API_KEY` (and optionally `OPENAI_VISION_MODEL`) in `.env`.
+
+```bash
+# Put your official PDFs in data/uploads/, then:
+
+# 1. Cheap smoke test on the first few pages (see the JSON before spending much):
+npm run import:vision -- --file "SAT Math (First 170 Questions).pdf" --limit 4 --dry-run
+
+# 2. A small real batch into the database:
+npm run import:vision -- --file "SAT Math (First 170 Questions).pdf" --limit 8
+
+# 3. The full import (all PDFs in data/uploads):
+npm run import:vision
+```
+
+Flags: `--file <name>` (one PDF), `--limit N` (first N pages), `--pages 5-12`,
+`--dry-run` (no DB writes; writes `data/imported/vision-*.json`), `--scale 2.5`
+(sharper images), `--mock` (no API calls — pipeline test). Imports are idempotent
+(upsert by Question ID), so re-running is safe, and running vision over a file you
+previously text-imported **upgrades** those questions to the clean version.
+
+### Alternative: text importer (fast, good for Reading & Writing)
+
+```bash
+npm run import:dry   # parse + write data/imported/*.json + print a report (no DB writes)
+npm run import       # parse and load into the database (idempotent by question id)
+```
+
+Reading & Writing extracts cleanly this way. Math will mostly be flagged for review.
+
+### Review flagged items
+
+Open **Import & Review** (`/admin/import`). Items either importer couldn't fully
+trust — figures/graphs, or anything low-confidence — are flagged **NEEDS_REVIEW**.
+Fix them with the live KaTeX preview editor and mark them reviewed. Only `OK`
+items appear in practice.
+
+### Curated fallback bank
+
+The app ships with an original, SAT-style Math + regression question set (seeded by
+`npm run db:seed`) so the Math section, equation rendering, and Regression Trainer
+work immediately — before you run any import. These are clearly labeled and can be
+deleted from the admin page.
 
 ### How parsing works (and its limits)
 

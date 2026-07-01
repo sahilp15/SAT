@@ -17,6 +17,7 @@
     "db:reset": "prisma migrate reset",
     "import": "tsx scripts/import/index.ts",
     "import:dry": "tsx scripts/import/index.ts --dry-run",
+    "import:vision": "tsx scripts/import/importVision.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -27,6 +28,7 @@
     "katex": "0.16.11",
     "next": "14.2.33",
     "openai": "4.73.0",
+    "pdf-to-png-converter": "3.7.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-katex": "3.0.1",

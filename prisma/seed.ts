@@ -4,9 +4,13 @@
 
 import { PrismaClient } from "@prisma/client";
 import { SAMPLE_QUESTIONS } from "./sampleQuestions";
+import { CURATED_MATH } from "./curatedMath";
 
 const prisma = new PrismaClient();
 const LOCAL_USER_EMAIL = "local@sat-prep.app";
+
+// Original sample set + curated math/regression bank.
+const ALL_SEED_QUESTIONS = [...SAMPLE_QUESTIONS, ...CURATED_MATH];
 
 async function main() {
   // Single local user with profile + settings.
@@ -24,7 +28,7 @@ async function main() {
 
   // Sample questions (idempotent by externalId).
   let inserted = 0;
-  for (const q of SAMPLE_QUESTIONS) {
+  for (const q of ALL_SEED_QUESTIONS) {
     const data = {
       externalId: q.externalId,
       section: q.section,
