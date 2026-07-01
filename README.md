@@ -58,11 +58,11 @@ npm install
 
 # 2. Set up environment variables
 cp .env.example .env
-#    (DATABASE_URL is already set for local SQLite; add OPENAI_API_KEY later if you want AI)
+#    (DATABASE_URL is already set for local SQLite — that's all you need. No API key required.)
 
-# 3. Create the local database and load sample questions
+# 3. Create the local database and load the question bank
 npm run db:migrate      # creates prisma/dev.db from the schema
-npm run db:seed         # adds a local profile + original sample questions
+npm run db:seed         # adds a local profile + 370+ preloaded Math questions
 
 # 4. Run the app
 npm run dev             # http://localhost:3000
@@ -95,85 +95,37 @@ gate** (every field must be filled in thoughtfully) instead of AI quality review
 
 ---
 
-## Importing your own SAT questions
+## Question bank
 
-There are two importers. **For Math, use the vision importer** — it's the only
-reliable way to recover equations from the official PDFs.
+The app ships with a **preloaded bank of 370+ original, SAT-style Math questions**
+(Algebra, Advanced Math, Problem-Solving & Data Analysis, Geometry & Trigonometry),
+plus a curated regression set and R&W samples. They load automatically with
+`npm run db:seed` — **no API key, no import step, no internet required.** Every
+question uses proper LaTeX and renders through KaTeX.
 
-### Why: the official PDFs store math as images
+These are original questions authored for this app (not College Board content), so
+they’re free to ship in the repo. Just `git pull` and seed, and the Math section is
+fully populated.
 
-In the SAT Question Bank PDFs, equations, answer choices, and figures are rendered
-as **images, not text**. Plain text extraction therefore loses ~87% of math answer
-choices and most inline equations (measured on the Math file). No text parser can
-fix that — the math was never text.
+### Optional: import your own question files
 
-### Recommended: vision importer (accurate LaTeX)
-
-Renders each PDF page to an image and uses an OpenAI **vision** model to transcribe
-questions into clean structured JSON with LaTeX math, choices, correct answers, and
-explanations. Requires `OPENAI_API_KEY` (and optionally `OPENAI_VISION_MODEL`) in `.env`.
-
-```bash
-# Put your official PDFs in data/uploads/, then:
-
-# 1. Cheap smoke test on the first few pages (see the JSON before spending much):
-npm run import:vision -- --file "SAT Math (First 170 Questions).pdf" --limit 4 --dry-run
-
-# 2. A small real batch into the database:
-npm run import:vision -- --file "SAT Math (First 170 Questions).pdf" --limit 8
-
-# 3. The full import (all PDFs in data/uploads):
-npm run import:vision
-```
-
-Flags: `--file <name>` (one PDF), `--limit N` (first N pages), `--pages 5-12`,
-`--dry-run` (no DB writes; writes `data/imported/vision-*.json`), `--scale 2.5`
-(sharper images), `--mock` (no API calls — pipeline test). Imports are idempotent
-(upsert by Question ID), so re-running is safe, and running vision over a file you
-previously text-imported **upgrades** those questions to the clean version.
-
-### Alternative: text importer (fast, good for Reading & Writing)
+If you later want to add your own questions from text-extractable PDFs, a
+label-anchored text importer is included:
 
 ```bash
 npm run import:dry   # parse + write data/imported/*.json + print a report (no DB writes)
 npm run import       # parse and load into the database (idempotent by question id)
 ```
 
-Reading & Writing extracts cleanly this way. Math will mostly be flagged for review.
+Reading & Writing extracts cleanly this way (choices are text). Math from official
+PDFs often stores equations as images, so those items get flagged **NEEDS_REVIEW**
+in **Import & Review** (`/admin/import`), where you can fix them with a live KaTeX
+preview editor. This step is entirely optional — the preloaded bank already makes
+the app work end-to-end.
 
-### Review flagged items
-
-Open **Import & Review** (`/admin/import`). Items either importer couldn't fully
-trust — figures/graphs, or anything low-confidence — are flagged **NEEDS_REVIEW**.
-Fix them with the live KaTeX preview editor and mark them reviewed. Only `OK`
-items appear in practice.
-
-### Curated fallback bank
-
-The app ships with an original, SAT-style Math + regression question set (seeded by
-`npm run db:seed`) so the Math section, equation rendering, and Regression Trainer
-work immediately — before you run any import. These are clearly labeled and can be
-deleted from the admin page.
-
-### How parsing works (and its limits)
-
-- The parser is **label-anchored** (`Question ID`, `Correct Answer:`,
-  `Question Difficulty:`, `Domain`/`Skill`, `Rationale`) so it handles the differing
-  field order between Math and R&W exports.
-- Math variables use Unicode math-italic symbols (𝑥, 𝑦…); these are normalized
-  (NFKC) toward plain text. Inline math wrapped in `$...$` renders via KaTeX.
-- **Reading & Writing** generally imports cleanly (choices are text).
-- **Math** often needs review: in PDF exports, equations and answer choices are
-  frequently images, so their text doesn’t extract. Those questions are flagged for
-  a quick manual fix rather than shipped wrong.
-- Any question identified as coming from an official **Bluebook** practice test can
-  be marked `isBluebook` and is then excluded from normal practice (reserved for
-  realistic diagnostics).
-
-> **Content note:** Official SAT questions are College Board copyrighted. This app
-> imports them into your *local* database for personal study only. Source files and
-> the local database are git-ignored and are **not** redistributed. Review College
-> Board’s content rules before ever making any of this public.
+> **Content note:** If you ever import official College Board questions, they’re
+> copyrighted. The importer writes them only to your *local* database for personal
+> study; source files and `dev.db` are git-ignored and are **not** redistributed.
 
 ---
 

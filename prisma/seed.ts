@@ -5,12 +5,18 @@
 import { PrismaClient } from "@prisma/client";
 import { SAMPLE_QUESTIONS } from "./sampleQuestions";
 import { CURATED_MATH } from "./curatedMath";
+import { GENERATED_MATH } from "./generatedMath";
 
 const prisma = new PrismaClient();
 const LOCAL_USER_EMAIL = "local@sat-prep.app";
 
-// Original sample set + curated math/regression bank.
-const ALL_SEED_QUESTIONS = [...SAMPLE_QUESTIONS, ...CURATED_MATH];
+// Original sample set + curated math/regression bank + preloaded 367-question
+// Math bank (generatedMath.json). All original, all seeded with no API key.
+const ALL_SEED_QUESTIONS = [
+  ...SAMPLE_QUESTIONS,
+  ...CURATED_MATH,
+  ...GENERATED_MATH,
+];
 
 async function main() {
   // Single local user with profile + settings.
