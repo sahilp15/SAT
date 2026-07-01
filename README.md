@@ -62,7 +62,7 @@ cp .env.example .env
 
 # 3. Create the local database and load the question bank
 npm run db:migrate      # creates prisma/dev.db from the schema
-npm run db:seed         # adds a local profile + 370+ preloaded Math questions
+npm run db:seed         # adds a local profile + 1,000+ preloaded Math and R&W questions
 
 # 4. Run the app
 npm run dev             # http://localhost:3000
@@ -97,15 +97,18 @@ gate** (every field must be filled in thoughtfully) instead of AI quality review
 
 ## Question bank
 
-The app ships with a **preloaded bank of 370+ original, SAT-style Math questions**
-(Algebra, Advanced Math, Problem-Solving & Data Analysis, Geometry & Trigonometry),
-plus a curated regression set and R&W samples. They load automatically with
-`npm run db:seed` — **no API key, no import step, no internet required.** Every
-question uses proper LaTeX and renders through KaTeX.
+The app ships with a **preloaded bank of 1,000+ original, SAT-style questions**
+that load automatically with `npm run db:seed` — **no API key, no import step, no
+internet required.** Every question uses proper LaTeX and renders through KaTeX.
+
+- **~400 Math questions** — Algebra, Advanced Math, Problem-Solving & Data
+  Analysis, Geometry & Trigonometry, plus a curated regression set.
+- **~620 Reading & Writing questions** — all four domains: Information and Ideas,
+  Craft and Structure, Expression of Ideas, and Standard English Conventions.
 
 These are original questions authored for this app (not College Board content), so
-they’re free to ship in the repo. Just `git pull` and seed, and the Math section is
-fully populated.
+they’re free to ship in the repo. Just `git pull` and seed, and both the Math and
+Reading & Writing sections are fully populated.
 
 ### Optional: import your own question files
 
