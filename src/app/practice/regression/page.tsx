@@ -18,7 +18,7 @@ export default function RegressionPage() {
         </p>
       </div>
 
-      <Card className="bg-brand-50/40">
+      <Card style={{ background: "var(--accent-weak)" }}>
         <div className="font-semibold text-slate-800">How to fit a regression in Desmos</div>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-slate-700">
           <li>

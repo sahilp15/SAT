@@ -3,8 +3,8 @@
 
 export function Footer() {
   return (
-    <footer className="mt-10 border-t border-slate-200 bg-white/60">
-      <div className="mx-auto max-w-6xl px-4 py-6 text-xs leading-relaxed text-slate-500 sm:px-6 lg:px-8">
+    <footer className="mt-10 border-t" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--surface) 60%, transparent)" }}>
+      <div className="mx-auto max-w-6xl px-4 py-6 text-xs leading-relaxed sm:px-6 lg:px-8" style={{ color: "var(--ink-faint)" }}>
         <p>
           <strong>Disclaimer:</strong> SAT&reg; is a trademark registered by the College Board.
           Official SAT / College Board questions and materials used in this app are the property of
