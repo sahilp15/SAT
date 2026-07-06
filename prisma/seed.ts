@@ -1,25 +1,15 @@
-// Seed: ensures one local user (+ profile + settings) and loads the original
-// sample questions so the app is usable immediately. Safe to run repeatedly —
-// everything is upserted by a stable key.
+// Seed: ensures one local user (+ profile + settings) and loads the curated
+// question bank so the app is usable immediately.
+//
+// This seed is authoritative: it first DELETES every existing question (and its
+// answer choices / attempts / SRS items, via cascade) and then loads exactly the
+// questions in the bank. Running it replaces the question set wholesale.
 
 import { PrismaClient } from "@prisma/client";
-import { SAMPLE_QUESTIONS } from "./sampleQuestions";
-import { CURATED_MATH } from "./curatedMath";
-import { GENERATED_MATH } from "./generatedMath";
-import { GENERATED_READING_WRITING } from "./generatedReadingWriting";
+import { QUESTION_BANK } from "./questionBank";
 
 const prisma = new PrismaClient();
 const LOCAL_USER_EMAIL = "local@sat-prep.app";
-
-// Original sample set + curated math/regression bank + preloaded Math bank
-// (generatedMath.json) + preloaded Reading & Writing bank
-// (generatedReadingWriting.json). All original, all seeded with no API key.
-const ALL_SEED_QUESTIONS = [
-  ...SAMPLE_QUESTIONS,
-  ...CURATED_MATH,
-  ...GENERATED_MATH,
-  ...GENERATED_READING_WRITING,
-];
 
 async function main() {
   // Single local user with profile + settings.
@@ -35,9 +25,14 @@ async function main() {
   });
   console.log(`Local user ready: ${user.id}`);
 
-  // Sample questions (idempotent by externalId).
+  // Wipe the entire existing question set. AnswerChoice, QuestionAttempt, and
+  // SrsItem all cascade-delete from Question, so this clears them too.
+  const removed = await prisma.question.deleteMany({});
+  console.log(`Deleted ${removed.count} existing questions.`);
+
+  // Load the curated bank.
   let inserted = 0;
-  for (const q of ALL_SEED_QUESTIONS) {
+  for (const q of QUESTION_BANK) {
     const data = {
       externalId: q.externalId,
       section: q.section,
@@ -49,20 +44,15 @@ async function main() {
       stem: q.stem,
       correctAnswer: q.correctAnswer,
       explanation: q.explanation,
-      source: "sample",
+      source: "question-bank",
       isBluebook: false,
       requiresCalculator: q.requiresCalculator ?? q.section === "MATH",
       desmosRelevant: q.desmosRelevant ?? q.section === "MATH",
       isRegression: q.isRegression ?? false,
-      reviewStatus: "OK",
+      reviewStatus: q.reviewStatus ?? "OK",
       importConfidence: 1.0,
     };
-    const question = await prisma.question.upsert({
-      where: { externalId: q.externalId },
-      create: data,
-      update: data,
-    });
-    await prisma.answerChoice.deleteMany({ where: { questionId: question.id } });
+    const question = await prisma.question.create({ data });
     if (q.choices.length > 0) {
       await prisma.answerChoice.createMany({
         data: q.choices.map((c) => ({
@@ -76,7 +66,7 @@ async function main() {
     }
     inserted++;
   }
-  console.log(`Seeded ${inserted} sample questions.`);
+  console.log(`Seeded ${inserted} questions from the bank.`);
 }
 
 main()

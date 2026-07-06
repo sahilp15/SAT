@@ -14,6 +14,7 @@ interface Props {
   correctAnswer: string;
   explanation: string | null;
   onApproved: () => void;
+  isMath?: boolean;
 }
 
 const empty = {
@@ -31,6 +32,7 @@ export function ErrorLogForm({
   correctAnswer,
   explanation,
   onApproved,
+  isMath = false,
 }: Props) {
   const [form, setForm] = useState(empty);
   const [submitting, setSubmitting] = useState(false);
@@ -95,21 +97,23 @@ export function ErrorLogForm({
   );
 
   return (
-    <div className="card border-amber-300 bg-amber-50/40">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="chip bg-amber-200 text-amber-800">Required error log</span>
-        <span className="text-sm text-slate-600">
+    <div className="card" style={{ borderColor: "var(--warn)", background: "color-mix(in srgb, var(--warn) 8%, var(--surface))" }}>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="chip" style={{ background: "color-mix(in srgb, var(--warn) 22%, var(--surface))", color: "var(--warn)" }}>
+          Required error log
+        </span>
+        <span className="text-sm" style={{ color: "var(--ink-soft)" }}>
           You chose <b>{chosenAnswer}</b>; correct answer is <b>{correctAnswer}</b>.
         </span>
       </div>
 
       {explanation ? (
-        <details className="mb-4 rounded-lg border border-slate-200 bg-white p-3 text-sm">
-          <summary className="cursor-pointer font-medium text-slate-700">
+        <details className="mb-4 rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+          <summary className="cursor-pointer font-medium" style={{ color: "var(--ink-soft)" }}>
             Official explanation
           </summary>
-          <div className="mt-2 leading-relaxed text-slate-700">
-            <MathText>{explanation}</MathText>
+          <div className="mathprose mt-2 leading-relaxed" style={{ color: "var(--ink-soft)" }}>
+            <MathText autoMath={isMath}>{explanation}</MathText>
           </div>
         </details>
       ) : null}

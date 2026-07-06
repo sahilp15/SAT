@@ -2,55 +2,273 @@
 @tailwind components;
 @tailwind utilities;
 
-/* KaTeX styles for math rendering */
+/* KaTeX styles for math rendering (bundled locally — works offline) */
 @import "katex/dist/katex.min.css";
 
+/* ---------------------------------------------------------------------------
+   Design tokens. Light + dark are defined at the token level so components
+   never branch on theme; the viewer's toggle stamps data-theme on <html>.
+--------------------------------------------------------------------------- */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #e5e9f2;
+  --border-strong: #d3d9e6;
+  --ink: #1b2130;
+  --ink-soft: #444c60;
+  --ink-faint: #6b7488;
+  --accent: #274bd6;
+  --accent-weak: #eef3ff;
+  --good: #0b8a5f;
+  --good-weak: #e6f6ef;
+  --bad: #d1435b;
+  --bad-weak: #fdecef;
+  --warn: #b5730b;
+  --highlight: #ffe37a;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1420;
+  --surface: #171d2b;
+  --surface-2: #1c2333;
+  --border: #2a3346;
+  --border-strong: #38435c;
+  --ink: #eef1f7;
+  --ink-soft: #c2c9d8;
+  --ink-faint: #8b95ab;
+  --accent: #7ea0ff;
+  --accent-weak: #1e2942;
+  --good: #4ade9f;
+  --good-weak: #16302a;
+  --bad: #ff8095;
+  --bad-weak: #331f26;
+  --warn: #e0a54a;
+  --highlight: #d8b23a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1420;
+    --surface: #171d2b;
+    --surface-2: #1c2333;
+    --border: #2a3346;
+    --border-strong: #38435c;
+    --ink: #eef1f7;
+    --ink-soft: #c2c9d8;
+    --ink-faint: #8b95ab;
+    --accent: #7ea0ff;
+    --accent-weak: #1e2942;
+    --good: #4ade9f;
+    --good-weak: #16302a;
+    --bad: #ff8095;
+    --bad-weak: #331f26;
+    --warn: #e0a54a;
+    --highlight: #d8b23a;
+  }
 }
 
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
+  color: var(--ink);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Keep inline math from inheriting odd line-heights inside passages */
+/* KaTeX sizing so inline math sits on the text baseline cleanly. */
 .katex {
-  font-size: 1.05em;
+  font-size: 1.04em;
+}
+.katex-display {
+  margin: 0.6rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
-/* Reusable component classes */
+/* Reading passage: serif, comfortable measure, like the digital test. */
+.passage {
+  font-family: theme("fontFamily.serif");
+  font-size: 1.02rem;
+  line-height: 1.75;
+  color: var(--ink);
+}
+
+/* Math prose — mathematical expressions inside render via KaTeX; the wrapper
+   just gives comfortable spacing. */
+.mathprose {
+  line-height: 1.7;
+}
+
+/* Text annotation (highlight / underline) applied to user selections. */
+mark.hl {
+  background: var(--highlight);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0.02em 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.ann-underline {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+/* CSS Custom Highlight API: drawn from live Ranges, no DOM mutation. */
+::highlight(sat-hl) {
+  background-color: var(--highlight);
+  color: var(--ink);
+}
+::highlight(sat-ul) {
+  text-decoration-line: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+/* Selection color that reads as an annotation-in-progress. */
+.annotatable ::selection {
+  background: color-mix(in srgb, var(--highlight) 70%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Component layer
+--------------------------------------------------------------------------- */
 @layer components {
   .card {
-    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-card;
+    @apply rounded-xl border p-5;
+    background: var(--surface);
+    border-color: var(--border);
+    box-shadow: theme("boxShadow.card");
+  }
+  .surface {
+    background: var(--surface);
+    border-color: var(--border);
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn text-white;
+    background: var(--accent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.06);
+    box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 55%, transparent);
   }
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply btn border;
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--ink-soft);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
   }
   .btn-ghost {
-    @apply btn text-slate-600 hover:bg-slate-100;
+    @apply btn;
+    color: var(--ink-soft);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
   }
   .label {
-    @apply block text-sm font-medium text-slate-700;
+    @apply block text-sm font-medium;
+    color: var(--ink-soft);
   }
   .input {
-    @apply mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+    @apply mt-1 block w-full rounded-lg border px-3 py-2 text-sm outline-none transition;
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--ink);
+  }
+  .input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   }
   .chip {
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
+  .toolbtn {
+    @apply inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors;
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--ink-soft);
+  }
+  .toolbtn:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .toolbtn[data-active="true"] {
+    background: var(--accent-weak);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+
+/* Focus-visible ring for keyboard users across interactive elements. */
+:where(button, a, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Dark-theme safety net. A handful of page files still use hardcoded Tailwind
+   slate/white utilities; remap those specific ones to tokens under dark so no
+   text or surface is ever invisible. Components already use tokens directly.
+   Written flat (no CSS nesting) to stay pipeline-agnostic.
+--------------------------------------------------------------------------- */
+:root[data-theme="dark"] .text-slate-900,
+:root[data-theme="dark"] .text-slate-800,
+:root:not([data-theme="light"]) .text-slate-900,
+:root:not([data-theme="light"]) .text-slate-800 {
+  color: var(--ink);
+}
+:root[data-theme="dark"] .text-slate-700,
+:root[data-theme="dark"] .text-slate-600,
+:root:not([data-theme="light"]) .text-slate-700,
+:root:not([data-theme="light"]) .text-slate-600 {
+  color: var(--ink-soft);
+}
+:root[data-theme="dark"] .text-slate-500,
+:root[data-theme="dark"] .text-slate-400,
+:root:not([data-theme="light"]) .text-slate-500,
+:root:not([data-theme="light"]) .text-slate-400 {
+  color: var(--ink-faint);
+}
+:root[data-theme="dark"] .bg-white,
+:root:not([data-theme="light"]) .bg-white {
+  background-color: var(--surface);
+}
+:root[data-theme="dark"] .bg-slate-50,
+:root[data-theme="dark"] .bg-slate-100,
+:root[data-theme="dark"] .bg-brand-50,
+:root:not([data-theme="light"]) .bg-slate-50,
+:root:not([data-theme="light"]) .bg-slate-100,
+:root:not([data-theme="light"]) .bg-brand-50 {
+  background-color: var(--surface-2);
+}
+:root[data-theme="dark"] .border-slate-200,
+:root[data-theme="dark"] .border-slate-300,
+:root:not([data-theme="light"]) .border-slate-200,
+:root:not([data-theme="light"]) .border-slate-300 {
+  border-color: var(--border);
 }
