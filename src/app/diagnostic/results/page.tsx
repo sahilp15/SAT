@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getLocalUser } from "@/lib/user";
 import { getErrorLog } from "@/lib/errorLog";
+import { getDiagnosticHistory } from "@/lib/diagnostic/history";
 import { practiceHref } from "@/lib/studyPlanner";
 import { MissedQuestionCard } from "@/components/review/MissedQuestionCard";
 import { DifficultyBars, DomainRadar, TimingChart } from "@/components/diagnostic/DiagnosticCharts";
@@ -15,9 +16,12 @@ import {
   EmptyState,
   IconAlert,
   IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
   IconClock,
   IconTarget,
   IconTrendUp,
+  InlineAlert,
   MetricRow,
   PageHeader,
   ProgressBar,
@@ -62,14 +66,29 @@ function parseBreakdown(json: string): (DiagnosticBreakdown & { confidenceNote?:
   }
 }
 
-export default async function DiagnosticResultsPage() {
+export default async function DiagnosticResultsPage({
+  searchParams,
+}: {
+  searchParams: { result?: string };
+}) {
   const user = await getLocalUser();
-  const result = await prisma.diagnosticResult.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const history = await getDiagnosticHistory(user.id);
 
+  // `?result=<id>` opens a specific past attempt; the default is the newest.
+  const attemptIndex = searchParams.result
+    ? history.timeline.findIndex((a) => a.resultId === searchParams.result)
+    : history.timeline.length - 1;
+  if (attemptIndex < 0) redirect("/diagnostic");
+
+  const attempt = history.timeline[attemptIndex];
+  const result = await prisma.diagnosticResult.findFirst({
+    where: { id: attempt.resultId, userId: user.id },
+  });
   if (!result) redirect("/diagnostic");
+
+  const isLatest = attemptIndex === history.timeline.length - 1;
+  const previous = attemptIndex > 0 ? history.timeline[attemptIndex - 1] : null;
+  const next = !isLatest ? history.timeline[attemptIndex + 1] : null;
 
   const [profile, recommendations, missed] = await Promise.all([
     prisma.studentProfile.findUnique({ where: { userId: user.id } }),
@@ -109,18 +128,74 @@ export default async function DiagnosticResultsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow={`Score Predictor · ${result.createdAt.toLocaleDateString()}`}
+        eyebrow={`Diagnostic ${result.formId} · attempt ${attemptIndex + 1} of ${history.timeline.length} · ${result.createdAt.toLocaleDateString()}`}
         title="Your predicted score"
         description="An estimate built from 20 questions. Treat the range as the real answer and the single number as its midpoint."
         actions={
           <>
             <ButtonLink href="/plan">See my plan</ButtonLink>
             <ButtonLink href="/diagnostic" variant="secondary">
-              Retake
+              All diagnostics
             </ButtonLink>
           </>
         }
       />
+
+      {/* --- Attempt navigation ------------------------------------------- */}
+      {history.timeline.length > 1 ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {previous ? (
+              <ButtonLink href={`/diagnostic/results?result=${previous.resultId}`} size="sm">
+                <IconChevronLeft size={14} />
+                Attempt {attemptIndex}
+              </ButtonLink>
+            ) : null}
+            {next ? (
+              <ButtonLink href={`/diagnostic/results?result=${next.resultId}`} size="sm">
+                Attempt {attemptIndex + 2}
+                <IconChevronRight size={14} />
+              </ButtonLink>
+            ) : null}
+            {!isLatest ? (
+              <ButtonLink
+                href={`/diagnostic/results?result=${history.timeline[history.timeline.length - 1].resultId}`}
+                size="sm"
+                variant="ghost"
+              >
+                Jump to latest
+              </ButtonLink>
+            ) : null}
+          </div>
+          {attempt.delta != null ? (
+            <p className="text-[0.8125rem] text-ink-3">
+              <span
+                className={`font-mono font-semibold ${
+                  attempt.delta > 0 ? "text-good" : attempt.delta < 0 ? "text-bad" : "text-ink"
+                }`}
+              >
+                {attempt.delta > 0 ? `+${attempt.delta}` : attempt.delta === 0 ? "±0" : attempt.delta}
+              </span>{" "}
+              versus your previous attempt
+              {Math.abs(attempt.delta) < 60
+                ? " — inside the normal swing between two 20-question estimates, so read it as flat"
+                : ""}
+              .
+            </p>
+          ) : (
+            <p className="text-[0.8125rem] text-ink-3">
+              Your first attempt — the baseline everything else is measured against.
+            </p>
+          )}
+        </Card>
+      ) : null}
+
+      {!isLatest ? (
+        <InlineAlert tone="accent" title="You're looking at an older attempt">
+          Scores, timing, and missed questions below are from this attempt. The recommendations and
+          study plan elsewhere in the app reflect everything you&apos;ve done since.
+        </InlineAlert>
+      ) : null}
 
       {/* --- Headline ---------------------------------------------------- */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[auto_1fr]">
@@ -373,8 +448,12 @@ export default async function DiagnosticResultsPage() {
       <Card>
         <CardHeader
           title="Start here"
-          eyebrow="High-priority improvements"
-          description="Ranked by how much of the test the skill covers, how far you are from your target mastery, and what kind of problem it is."
+          eyebrow={isLatest ? "High-priority improvements" : "Current priorities, not this attempt's"}
+          description={
+            isLatest
+              ? "Ranked by how much of the test the skill covers, how far you are from your target mastery, and what kind of problem it is."
+              : "These reflect everything you've practiced since this attempt, not the state you were in when you took it."
+          }
           action={<ArrowLink href="/practice">All recommendations</ArrowLink>}
         />
         {recommendations.length === 0 ? (
@@ -478,10 +557,21 @@ export default async function DiagnosticResultsPage() {
       <p className="pb-2 text-center text-[0.75rem] text-ink-3">
         Predicted scores are estimates from a 20-question diagnostic and are not official College
         Board scores.{" "}
-        <Link href="/plan" className="font-medium text-accent hover:underline">
-          Your study plan
-        </Link>{" "}
-        has already been rebuilt around these results.
+        {isLatest ? (
+          <>
+            <Link href="/plan" className="font-medium text-accent hover:underline">
+              Your study plan
+            </Link>{" "}
+            has already been rebuilt around these results.
+          </>
+        ) : (
+          <>
+            <Link href="/diagnostic" className="font-medium text-accent hover:underline">
+              The diagnostics hub
+            </Link>{" "}
+            shows how this attempt fits the rest of your history.
+          </>
+        )}
       </p>
     </div>
   );

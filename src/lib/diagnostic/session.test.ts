@@ -3,12 +3,13 @@ import { prisma } from "../db";
 import { deriveQuestionMeta } from "../questionMeta";
 import { updateSkillMastery } from "../mastery";
 import { regenerateRecommendations } from "../recommendations";
-import { allDiagnosticSlots } from "./form";
+import { FORMS, allSlots } from "./form";
 import {
   BLOCKS,
   advanceBlock,
   blockForIndex,
   getSessionState,
+  nextFormId,
   saveResponse,
   startOrResumeSession,
   submitSession,
@@ -46,10 +47,13 @@ beforeAll(async () => {
   ];
   const byId = new Map(bank.map((q) => [q.externalId, q]));
 
-  // Only the 40 questions the diagnostic form needs — the tests don't need the
+  // Only the questions the diagnostic forms reference — the tests don't need the
   // whole bank, and a smaller seed keeps them fast.
   await prisma.question.deleteMany({});
-  for (const slot of allDiagnosticSlots()) {
+  const everySlot = [...new Map(
+    FORMS.flatMap((f) => allSlots(f)).map((s) => [s.externalId, s])
+  ).values()];
+  for (const slot of everySlot) {
     const q = byId.get(slot.externalId);
     if (!q) throw new Error(`Bank is missing ${slot.externalId}`);
     const meta = deriveQuestionMeta(q);
@@ -272,7 +276,16 @@ describe("adaptive routing", () => {
     expect(result.track).toBe("EASY");
     const state = await getSessionState(userId, session.id);
     const adaptive = state!.questions.filter((q) => q.stage === "ADAPTIVE");
-    expect(adaptive.filter((q) => q.difficulty === "EASY").length).toBeGreaterThanOrEqual(3);
+    expect(adaptive).toHaveLength(5);
+
+    // What matters is that this set is genuinely easier than the alternatives,
+    // not a fixed count of EASY items — the blueprint tunes that mix.
+    const rank = { EASY: 0, MEDIUM: 1, HARD: 2 } as const;
+    const avg = (list: { difficulty: string }[]) =>
+      list.reduce((sum, q) => sum + rank[q.difficulty as keyof typeof rank], 0) / list.length;
+    const routing = state!.questions.filter((q) => q.stage === "ROUTING");
+    expect(avg(adaptive)).toBeLessThan(avg(routing));
+    expect(avg(adaptive)).toBeLessThan(rank.MEDIUM);
   });
 
   it("routes Math and Reading & Writing independently", async () => {
@@ -473,5 +486,100 @@ describe("recommendation regeneration", () => {
       where: { userId, status: "ACTIVE" },
     });
     expect(stored.filter((r) => r.skill === "Circles")).toHaveLength(1);
+  });
+});
+
+describe("multiple forms", () => {
+  async function completeForm(formId?: number) {
+    const session = await startOrResumeSession(userId, formId);
+    for (let block = 0; block < BLOCKS.length; block += 1) {
+      await answerBlock(session.id, true, block);
+      await advanceBlock(userId, session.id);
+    }
+    await submitSession(userId, session.id);
+    return session;
+  }
+
+  it("starts with diagnostic 1 and advances to the next untaken one", async () => {
+    expect(await nextFormId(userId)).toBe(1);
+    await completeForm();
+    expect(await nextFormId(userId)).toBe(2);
+    await completeForm();
+    expect(await nextFormId(userId)).toBe(3);
+  });
+
+  it("gives consecutive diagnostics different questions", async () => {
+    const first = await completeForm(1);
+    const second = await completeForm(2);
+
+    const idsFor = async (sessionId: string) => {
+      const rows = await prisma.diagnosticResponse.findMany({
+        where: { sessionId },
+        select: { questionId: true },
+      });
+      return new Set(rows.map((r) => r.questionId));
+    };
+
+    const a = await idsFor(first.id);
+    const b = await idsFor(second.id);
+    expect(a.size).toBe(20);
+    expect(b.size).toBe(20);
+    // Back-to-back forms must share nothing at all.
+    expect([...a].filter((id) => b.has(id))).toHaveLength(0);
+  });
+
+  it("records which form each attempt used", async () => {
+    await completeForm(1);
+    await completeForm(4);
+    const results = await prisma.diagnosticResult.findMany({
+      where: { userId },
+      orderBy: { createdAt: "asc" },
+      select: { formId: true },
+    });
+    expect(results.map((r) => r.formId)).toEqual([1, 4]);
+  });
+
+  it("lets a specific form be requested out of order", async () => {
+    const session = await startOrResumeSession(userId, 7);
+    expect(session.formId).toBe(7);
+  });
+
+  it("abandons an in-progress attempt when a different form is requested", async () => {
+    const first = await startOrResumeSession(userId, 2);
+    const second = await startOrResumeSession(userId, 5);
+    expect(second.id).not.toBe(first.id);
+    expect(second.formId).toBe(5);
+
+    const stale = await prisma.diagnosticSession.findUniqueOrThrow({ where: { id: first.id } });
+    expect(stale.status).toBe("ABANDONED");
+  });
+
+  it("resumes rather than restarting when the same form is requested", async () => {
+    const first = await startOrResumeSession(userId, 3);
+    const again = await startOrResumeSession(userId, 3);
+    expect(again.id).toBe(first.id);
+  });
+
+  it("rejects a form id that does not exist", async () => {
+    await expect(startOrResumeSession(userId, 999)).rejects.toThrow(/doesn't exist/);
+  });
+
+  it("routes each form independently on its own questions", async () => {
+    const session = await startOrResumeSession(userId, 6);
+    await answerBlock(session.id, false, 0);
+    const result = await advanceBlock(userId, session.id);
+    expect(result.track).toBe("EASY");
+
+    const state = await getSessionState(userId, session.id);
+    const adaptive = state!.questions.filter((q) => q.stage === "ADAPTIVE");
+    expect(adaptive).toHaveLength(5);
+    // The adaptive set belongs to form 6, not form 1.
+    const form6 = FORMS[5];
+    const expected = new Set(allSlots(form6).map((s) => s.externalId));
+    const rows = await prisma.question.findMany({
+      where: { id: { in: adaptive.map((q) => q.id) } },
+      select: { externalId: true },
+    });
+    for (const row of rows) expect(expected.has(row.externalId ?? "")).toBe(true);
   });
 });

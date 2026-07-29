@@ -4,7 +4,8 @@
 import { prisma } from "./db";
 import { getTodayPlan, readWeeklyGoals, type PlanDayView } from "./planning";
 import { getAppStatus, type AppStatus } from "./status";
-import { resolveTestDate, startOfDay, toIsoDate } from "./testDate";
+import { daysBetween, resolveTestDate, startOfDay, toIsoDate } from "./testDate";
+import { FORMS } from "./diagnostic/form";
 import type { WeeklyGoal } from "./studyPlanner";
 import type { MasterySignal } from "./mastery";
 
@@ -49,6 +50,18 @@ export interface DashboardData {
 
 const WEEK_MS = 7 * 86_400_000;
 
+/**
+ * How stale an estimate has to get before retaking beats today's plan. Two or
+ * three diagnostics a week is the intended cadence; a week without one means the
+ * plan is being built on evidence that has stopped describing the student.
+ */
+export const STALE_DIAGNOSTIC_DAYS = 7;
+
+/** The lowest-numbered diagnostic not yet submitted, or null once all are done. */
+export function untakenFormId(taken: Set<number>): number | null {
+  return FORMS.find((f) => !taken.has(f.id))?.id ?? null;
+}
+
 export async function getDashboardData(
   userId: string,
   now: Date = new Date()
@@ -78,7 +91,13 @@ export async function getDashboardData(
       prisma.diagnosticResult.findMany({
         where: { userId },
         orderBy: { createdAt: "asc" },
-        select: { createdAt: true, totalScore: true, mathScore: true, rwScore: true },
+        select: {
+          createdAt: true,
+          formId: true,
+          totalScore: true,
+          mathScore: true,
+          rwScore: true,
+        },
       }),
     ]);
 
@@ -158,6 +177,8 @@ export async function getDashboardData(
       dailyGoal: profile?.dailyGoalQuestions ?? 20,
       unresolvedErrors,
       daysRemaining: resolved?.daysRemaining ?? null,
+      daysSinceDiagnostic: latestResult ? daysBetween(latestResult.createdAt, now) : null,
+      nextDiagnosticId: untakenFormId(new Set(results.map((r) => r.formId))),
     }),
     unresolvedErrors,
     predictedSection: {
@@ -183,6 +204,10 @@ export function pickNextAction(input: {
   dailyGoal: number;
   unresolvedErrors: number;
   daysRemaining: number | null;
+  /** Whole days since the most recent submitted diagnostic. */
+  daysSinceDiagnostic: number | null;
+  /** The diagnostic to suggest next, or null when every form is done. */
+  nextDiagnosticId: number | null;
 }): { label: string; href: string; detail: string } {
   if (!input.hasDiagnostic) {
     return {
@@ -204,6 +229,19 @@ export function pickNextAction(input: {
       label: `Clear ${input.dueCount} due review${input.dueCount === 1 ? "" : "s"}`,
       href: "/review/spaced-repetition",
       detail: "Spaced repetition first — these are questions you've already missed once.",
+    };
+  }
+  // Two or three diagnostics a week keeps the estimate — and therefore the plan —
+  // built on current evidence. Past a week, it isn't.
+  if (
+    input.daysSinceDiagnostic != null &&
+    input.daysSinceDiagnostic >= STALE_DIAGNOSTIC_DAYS &&
+    input.nextDiagnosticId != null
+  ) {
+    return {
+      label: `Take diagnostic ${input.nextDiagnosticId}`,
+      href: `/diagnostic/run?form=${input.nextDiagnosticId}`,
+      detail: `Your last one was ${input.daysSinceDiagnostic} days ago. A fresh 20-question read keeps the plan pointed at what's actually weak now.`,
     };
   }
   if (input.today && input.today.items.length > 0 && !input.today.completed) {

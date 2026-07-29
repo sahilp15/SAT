@@ -166,6 +166,40 @@ The user-visible signals map onto the pipeline like this:
 
 ---
 
+## Comparing attempts across forms
+
+The app ships 18 diagnostic forms. They are not 18 different tests: every form is built
+from one blueprint (`src/lib/diagnostic/blueprint.ts`) that fixes, for each of the 20
+positions, which section it belongs to, which content domain it draws from, and which
+difficulty bucket it uses. Form 12's third Math routing question is an Algebra MEDIUM item
+exactly as form 1's is. Only the specific question changes.
+
+That is what makes two attempts comparable. The score model above takes item difficulty as
+its input, so equal blueprints mean equal difficulty inputs, and a difference between two
+attempts reflects a difference in performance rather than a difference in the instrument.
+
+Three caveats apply when reading a change between attempts:
+
+1. **The instrument is identical; the items are not.** Two MEDIUM Algebra items are not
+   exactly equally hard. This residual form-to-form variation is not modelled and sits
+   inside the reported confidence range rather than being corrected out.
+2. **Sampling noise dominates small changes.** With a half-width of roughly 30–140 points,
+   consecutive attempts can differ by 30–60 points with no change in ability at all. The
+   hub says so directly rather than celebrating the difference. A rise is evidence only
+   once it clears the previous attempt's range, or once several attempts trend the same
+   way.
+3. **The trend line is least squares, not last-minus-first.** `scoreTrend` in
+   `src/lib/diagnostic/history.ts` fits a slope across every completed attempt and reports
+   points per attempt. It is deliberately shown only from the third attempt onward: from
+   two points, "points per attempt" is just the delta restated with an unearned air of
+   authority.
+
+Retaking a form you have already completed is allowed, and the hub labels it. Its questions
+are no longer novel to you, so treat that score as the least trustworthy kind of attempt —
+it measures recall of those items alongside ability.
+
+---
+
 ## Known limitations
 
 1. **Sample size.** Ten items per section is a small instrument. The ±80–140 point range is

@@ -13,12 +13,21 @@ stores progress in a local SQLite database.
 
 ## What it does
 
-**Adaptive score predictor.** A curated 20-question diagnostic — 10 Math, 10 Reading &
-Writing. Each section runs a fixed 5-question routing stage spanning all four content
-domains, then routes independently into one of three adaptive tracks. It reports a
+**Eighteen adaptive score predictors.** Each diagnostic is 20 curated questions — 10 Math,
+10 Reading & Writing. Each section runs a fixed 5-question routing stage spanning all four
+content domains, then routes independently into one of three adaptive tracks. It reports a
 predicted score with an honest confidence range, plus a full breakdown by domain, skill,
 difficulty, and timing. See [`docs/SCORING.md`](docs/SCORING.md) for the complete
 methodology.
+
+All 18 forms are built from one shared blueprint — the same domains at the same
+difficulties in the same positions — so only the questions differ and scores stay
+comparable across attempts. Every Reading & Writing question is unique across all 18 forms;
+the Math pool is smaller, so Math questions repeat at most once every three forms (four, on
+the track a given student actually sees). Take two or three a week and the diagnostics hub
+plots the trend with its confidence band, so a rise that hasn't outrun the noise looks like
+what it is. Questions belonging to diagnostics you haven't taken yet are held out of
+practice; once a diagnostic is submitted, its questions rejoin the practice pool.
 
 **Mistake analysis on every miss.** Each wrong answer is classified by likely cause —
 concept gap, misread, careless slip, incorrect setup, time pressure, elimination trouble —
@@ -95,7 +104,14 @@ touches your `dev.db`.
 | `npm run db:studio`     | Browse the local database                                  |
 | `npm run db:reset`      | Drop and recreate the database                             |
 | `npm run import`        | Import your own question exports from `data/uploads/`      |
+| `npm run build:forms`   | Regenerate the 18 diagnostic forms from the question bank  |
 | `npm run test:watch`    | Tests in watch mode                                        |
+
+`build:forms` is deterministic — the same bank produces the same forms — and rewrites
+`src/lib/diagnostic/forms.generated.ts`, which is committed. Run it only after importing
+new questions, and re-run `npm run db:seed` afterwards so the newly reserved questions are
+marked. Regenerating changes which questions a not-yet-taken diagnostic will use; already
+submitted results are unaffected.
 
 ---
 
@@ -113,7 +129,10 @@ src/
     diagnostic/ practice/ review/ plan/ dashboard/ tutor/ settings/ onboarding/
   lib/
     diagnostic/
-      form.ts              The curated 20-question form (by stable question id)
+      blueprint.ts         The 20-slot blueprint every form is built on
+      forms.generated.ts   GENERATED — 18 forms as stable question ids
+      form.ts              Form lookup and slot resolution
+      history.ts           Attempt history, deltas, and the score trend
       routing.ts           Adaptive routing — pure, deterministic
       scoring.ts           The score model — pure, deterministic, documented
       mistakes.ts          Heuristic mistake classification

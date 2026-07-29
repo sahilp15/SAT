@@ -414,6 +414,9 @@ model DiagnosticSession {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Which numbered diagnostic this is. All forms share one blueprint, so scores
+  // from different forms are directly comparable — see src/lib/diagnostic/blueprint.ts.
+  formId      Int       @default(1)
   status      String    @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED | ABANDONED
   startedAt   DateTime  @default(now())
   submittedAt DateTime?
@@ -466,6 +469,8 @@ model DiagnosticResult {
   userId    String
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Denormalized from the session so the history list can be read in one query.
+  formId     Int @default(1)
   mathScore  Int // 200–800
   rwScore    Int // 200–800
   totalScore Int // 400–1600

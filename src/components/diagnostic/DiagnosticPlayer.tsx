@@ -55,6 +55,7 @@ interface Block {
 
 interface SessionState {
   sessionId: string;
+  formId: number;
   status: string;
   currentIndex: number;
   totalQuestions: number;
@@ -103,7 +104,14 @@ const TRACK_COPY: Record<string, { title: string; body: string }> = {
   },
 };
 
-export function DiagnosticPlayer({ sessionId: initialSessionId }: { sessionId?: string }) {
+export function DiagnosticPlayer({
+  sessionId: initialSessionId,
+  formId,
+}: {
+  sessionId?: string;
+  /** Open a specific diagnostic; omitted means "the next one not yet taken". */
+  formId?: number;
+}) {
   const router = useRouter();
   const [state, setState] = useState<SessionState | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -147,7 +155,11 @@ export function DiagnosticPlayer({ sessionId: initialSessionId }: { sessionId?: 
       try {
         let sid = sessionRef.current;
         if (!sid) {
-          const res = await fetch("/api/diagnostic/start", { method: "POST" });
+          const res = await fetch("/api/diagnostic/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(formId ? { formId } : {}),
+          });
           const data = (await res.json()) as { sessionId?: string; message?: string };
           if (!res.ok || !data.sessionId) {
             throw new Error(data.message ?? "The diagnostic could not be started.");
@@ -170,7 +182,7 @@ export function DiagnosticPlayer({ sessionId: initialSessionId }: { sessionId?: 
     return () => {
       cancelled = true;
     };
-  }, [loadState]);
+  }, [loadState, formId]);
 
   // --- Derived ------------------------------------------------------------
   const question = useMemo(
@@ -456,7 +468,9 @@ export function DiagnosticPlayer({ sessionId: initialSessionId }: { sessionId?: 
     return (
       <div className="mx-auto max-w-xl animate-fade-up px-5 py-16">
         <p className="eyebrow">Final step</p>
-        <h1 className="mt-3 text-2xl text-ink">Submit your diagnostic?</h1>
+        <h1 className="mt-3 text-2xl text-ink">
+          Submit diagnostic {state?.formId ?? ""}?
+        </h1>
         <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink-3">
           Once you submit, answers are locked and your predicted score is calculated. You&apos;ll
           see every question again with a full explanation.
@@ -533,7 +547,8 @@ export function DiagnosticPlayer({ sessionId: initialSessionId }: { sessionId?: 
               {SECTION_LABEL[question.section]}
             </p>
             <p className="truncate font-mono text-[0.625rem] uppercase tracking-wider text-ink-3">
-              {block.stage === "ROUTING" ? "Routing stage" : "Adaptive stage"} · {positionInBlock}/
+              Diagnostic {state.formId} ·{" "}
+              {block.stage === "ROUTING" ? "Routing" : "Adaptive"} · {positionInBlock}/
               {blockQuestions.length}
             </p>
           </div>
