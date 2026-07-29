@@ -2,7 +2,7 @@
   "name": "sat-prep-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first SAT prep app (Version 1) — personalized practice, forced error logs, spaced repetition, and progress tracking for Reading & Writing and Math.",
+  "description": "Local-first SAT prep app (Version 1) \u2014 personalized practice, forced error logs, spaced repetition, and progress tracking for Reading & Writing and Math.",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "import": "tsx scripts/import/index.ts",

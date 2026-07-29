@@ -70,6 +70,11 @@ npm run dev          # http://localhost:3000
 
 Then open <http://localhost:3000> and complete onboarding.
 
+**A note on env files:** put `DATABASE_URL` in `.env`, not `.env.local`. Next.js reads both,
+but the Prisma CLI only reads `.env` — so a URL that lives only in `.env.local` gives you a
+working app and a `DATABASE_URL not found` error from every `prisma` command. Secrets like
+`OPENAI_API_KEY` can live in either; `.env.local` wins on conflicts and both are gitignored.
+
 ### Quality checks
 
 ```bash
