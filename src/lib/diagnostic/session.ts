@@ -18,16 +18,19 @@ import { regenerateRecommendations } from "../recommendations";
 import { initialSrsState } from "../srs";
 import type { Difficulty, Section } from "../taxonomy";
 import {
-  DIAGNOSTIC_FORM,
+  FORMS,
+  FORM_COUNT,
   QUESTIONS_PER_SECTION,
   QUESTIONS_PER_STAGE,
   SECTION_ORDER,
   TOTAL_QUESTIONS,
+  getForm,
   routingSlots,
   trackSlots,
-  type DiagnosticSlot,
+  type DiagnosticForm,
   type DiagnosticStage,
   type DiagnosticTrack,
+  type ResolvedSlot,
 } from "./form";
 import { decideTrack, type RoutingResponse } from "./routing";
 import { scoreDiagnostic, type ScoredResponse } from "./scoring";
@@ -85,7 +88,7 @@ function parseForm(json: string): FormEntry[] {
   return [];
 }
 
-async function resolveSlots(slots: DiagnosticSlot[]): Promise<Map<string, string>> {
+async function resolveSlots(slots: ResolvedSlot[]): Promise<Map<string, string>> {
   const rows = await prisma.question.findMany({
     where: { externalId: { in: slots.map((s) => s.externalId) } },
     select: { id: true, externalId: true },
@@ -95,9 +98,9 @@ async function resolveSlots(slots: DiagnosticSlot[]): Promise<Map<string, string
   return map;
 }
 
-/** Build the initial 20-entry form with routing questions resolved. */
-async function buildInitialForm(): Promise<FormEntry[]> {
-  const routing = SECTION_ORDER.flatMap((section) => routingSlots(section));
+/** Build the initial 20-entry plan with this form's routing questions resolved. */
+async function buildInitialForm(form: DiagnosticForm): Promise<FormEntry[]> {
+  const routing = SECTION_ORDER.flatMap((section) => routingSlots(form, section));
   const ids = await resolveSlots(routing);
 
   const missing = routing.filter((s) => !ids.has(s.externalId));
@@ -110,7 +113,7 @@ async function buildInitialForm(): Promise<FormEntry[]> {
   const entries: FormEntry[] = [];
   SECTION_ORDER.forEach((section, s) => {
     const base = s * QUESTIONS_PER_STAGE * 2;
-    routingSlots(section).forEach((slot, i) => {
+    routingSlots(form, section).forEach((slot, i) => {
       entries.push({
         index: base + i,
         section,
@@ -147,14 +150,48 @@ export async function getActiveSession(userId: string) {
   });
 }
 
-/** Resume the in-progress session, or start a fresh one. */
-export async function startOrResumeSession(userId: string) {
-  const existing = await getActiveSession(userId);
-  if (existing) return existing;
+/**
+ * The lowest-numbered form the student hasn't submitted yet. Once every form is
+ * done it wraps to the one completed longest ago, so the diagnostic never runs
+ * out — by then those questions are months stale, which is a fair retest.
+ */
+export async function nextFormId(userId: string): Promise<number> {
+  const submitted = await prisma.diagnosticSession.findMany({
+    where: { userId, status: "SUBMITTED" },
+    select: { formId: true, submittedAt: true },
+    orderBy: { submittedAt: "asc" },
+  });
+  const done = new Set(submitted.map((s) => s.formId));
+  for (const form of FORMS) {
+    if (!done.has(form.id)) return form.id;
+  }
+  return submitted[0]?.formId ?? 1;
+}
 
-  const form = await buildInitialForm();
+/**
+ * Resume the in-progress session, or start a fresh one. Passing a formId starts
+ * that specific diagnostic; omitting it picks the next one not yet taken.
+ */
+export async function startOrResumeSession(userId: string, requestedFormId?: number) {
+  const existing = await getActiveSession(userId);
+  // An explicit request for a *different* form abandons the stale one rather
+  // than silently dropping the student back into it.
+  if (existing) {
+    if (requestedFormId === undefined || existing.formId === requestedFormId) return existing;
+    await abandonSession(userId, existing.id);
+  }
+
+  const formId = requestedFormId ?? (await nextFormId(userId));
+  const form = getForm(formId);
+  if (!form) {
+    throw new DiagnosticUnavailableError(
+      `Diagnostic ${formId} doesn't exist. There are ${FORM_COUNT} diagnostics available.`
+    );
+  }
+
+  const entries = await buildInitialForm(form);
   const session = await prisma.diagnosticSession.create({
-    data: { userId, formJson: JSON.stringify(form) },
+    data: { userId, formId, formJson: JSON.stringify(entries) },
     include: { responses: true },
   });
   await prisma.studentProfile.updateMany({
@@ -188,6 +225,8 @@ export interface ClientResponse {
 
 export interface DiagnosticState {
   sessionId: string;
+  /** Which of the interchangeable forms this attempt is running. */
+  formId: number;
   status: string;
   currentIndex: number;
   totalQuestions: number;
@@ -239,6 +278,7 @@ export async function getSessionState(
 
   return {
     sessionId: session.id,
+    formId: session.formId,
     status: session.status,
     currentIndex: session.currentIndex,
     totalQuestions: TOTAL_QUESTIONS,
@@ -378,7 +418,11 @@ export async function advanceBlock(userId: string, sessionId: string): Promise<A
       });
 
     const decision = decideTrack(responses);
-    const slots = trackSlots(block.section, decision.track);
+    const activeForm = getForm(session.formId);
+    if (!activeForm) {
+      throw new DiagnosticUnavailableError(`Diagnostic form ${session.formId} no longer exists.`);
+    }
+    const slots = trackSlots(activeForm, block.section, decision.track);
     const ids = await resolveSlots(slots);
     const missing = slots.filter((s) => !ids.has(s.externalId));
     if (missing.length) {
@@ -484,6 +528,7 @@ export async function submitSession(userId: string, sessionId: string): Promise<
     data: {
       sessionId,
       userId,
+      formId: session.formId,
       mathScore: score.math.score,
       rwScore: score.rw.score,
       totalScore: score.total,
@@ -611,4 +656,4 @@ export async function getLatestResult(userId: string) {
   });
 }
 
-export { DIAGNOSTIC_FORM, TOTAL_QUESTIONS, QUESTIONS_PER_STAGE };
+export { FORMS, FORM_COUNT, TOTAL_QUESTIONS, QUESTIONS_PER_STAGE };

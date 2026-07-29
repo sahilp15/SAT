@@ -3,6 +3,7 @@
 
 import { prisma } from "./db";
 import { analyzeMistake, type MistakeSignals } from "./diagnostic/mistakes";
+import { FORMS, allSlots } from "./diagnostic/form";
 import { updateSkillMastery } from "./mastery";
 import type { Difficulty, Section } from "./taxonomy";
 import {
@@ -40,6 +41,30 @@ export interface ClientQuestion {
   timeRecommendationSec: number | null;
   isRegression: boolean;
   choices: { label: string; content: string }[];
+}
+
+/**
+ * Questions belonging to diagnostics the student hasn't finished yet are held
+ * back from practice, so a score estimate is never contaminated by having drilled
+ * its exact items the day before.
+ *
+ * Only *pending* forms are excluded. Once a diagnostic is submitted its questions
+ * rejoin the practice pool, which is the right outcome — re-meeting a question
+ * you just got wrong is spaced review, not a leak. With 18 forms that keeps
+ * roughly half the bank available immediately and opens the rest as you go.
+ */
+async function pendingDiagnosticExclusion(userId: string): Promise<Record<string, unknown>> {
+  const submitted = await prisma.diagnosticSession.findMany({
+    where: { userId, status: "SUBMITTED" },
+    select: { formId: true },
+    distinct: ["formId"],
+  });
+  const done = new Set(submitted.map((s) => s.formId));
+  const pending = FORMS.filter((f) => !done.has(f.id));
+  if (pending.length === 0) return {};
+
+  const reserved = new Set(pending.flatMap((f) => allSlots(f).map((s) => s.externalId)));
+  return { externalId: { notIn: [...reserved] } };
 }
 
 export interface QuestionRow {
@@ -121,12 +146,10 @@ export async function getNextQuestion(
     return srs ? toClientQuestion(srs.question) : null;
   }
 
-  // Diagnostic-reserved items are held back so the score predictor always sees
-  // questions the student has not already worked through in practice.
   const where: Record<string, unknown> = {
     isBluebook: false,
-    isDiagnostic: false,
     reviewStatus: "OK",
+    ...(await pendingDiagnosticExclusion(userId)),
   };
   if (opts.section) where.section = opts.section;
   if (opts.difficulty) where.difficulty = opts.difficulty;
@@ -173,8 +196,8 @@ export async function getPracticeSet(
 ): Promise<ClientQuestion[]> {
   const where: Record<string, unknown> = {
     isBluebook: false,
-    isDiagnostic: false,
     reviewStatus: "OK",
+    ...(await pendingDiagnosticExclusion(userId)),
   };
   if (opts.section) where.section = opts.section;
   if (opts.skill) where.skill = opts.skill;

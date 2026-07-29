@@ -17,7 +17,8 @@
     "db:reset": "prisma migrate reset",
     "import": "tsx scripts/import/index.ts",
     "import:dry": "tsx scripts/import/index.ts --dry-run",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "build:forms": "tsx scripts/build-diagnostic-forms.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

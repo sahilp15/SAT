@@ -67,33 +67,76 @@ infinite one.
 
 ## 5. Content-domain correction
 
-A ten-item section cannot sample the four content domains in blueprint proportion. So a
-second ability estimate is computed per domain, recombined using the blueprint weights in
-[`taxonomy.ts`](../src/lib/taxonomy.ts), and blended:
+A ten-item section cannot sample the four content domains in blueprint proportion. The
+correction re-weights the responses *inside* the single estimate in step 4, rather than
+scoring each domain separately and averaging. For each domain:
 
 ```
-θ_final = 0.8 · θ_overall + 0.2 · θ_blueprint
+target   = blueprint weight (taxonomy.ts), renormalized over sampled domains
+observed = questions from that domain / questions in the section
+wᵢ *= clamp(0.5, 1.75, 1 + 0.2 · (target/observed − 1))
 ```
 
-This nudges the estimate toward what the student would likely score on a properly
-proportioned test without letting one domain dominate.
+The multipliers are then renormalized so `Σw` is unchanged: the correction moves *where*
+the evidence comes from, never how much of it there is, so it cannot widen or narrow the
+confidence range as a side effect.
+
+Damping by 0.2 and clamping to [0.5, 1.75] keep it a nudge. Without them, a lone response
+in a domain the blueprint weights heavily would be scaled past 2× and end up speaking for
+the whole section.
+
+> **Why not average per-domain estimates?** An earlier version did, and it was wrong. Each
+> per-domain estimate applies the `N(0, 1.2²)` prior to two or three items, so each one is
+> shrunk hard toward zero; averaging five heavily-shrunk estimates is far more shrinkage
+> than shrinking once. The result was a systematic pull toward the middle at *both* ends of
+> the scale — roughly 0.2 logits, or 25 points, off a strong or weak performance.
 
 ## 6. Scaled score
 
 A documented linear anchor maps logits to the 200–800 section scale:
 
-| θ   | score |
-| --- | ----- |
-| −3  | 250   |
-|  0  | 520   |
-| +3  | 790   |
+| θ     | score |
+| ----- | ----- |
+| −2.35 | 240   |
+| −1    | 400   |
+|  0    | 520   |
+| +1    | 640   |
+| +2.35 | 800   |
 
 ```
-score = clamp(200, 800, round((520 + 90·θ) / 10) · 10)
+score = clamp(200, 800, round((520 + 120·θ) / 10) · 10)
 ```
 
 Scores are reported in multiples of 10, like the real exam. The total is the sum of the two
 section scores, clamped to 400–1600.
+
+**Why 520 and 120.** 520 is roughly the population mean section score. 120 points per logit
+puts one unit of latent ability at about one standard deviation of the real section-score
+distribution, which is the usual IRT convention.
+
+It is also the slope that makes the top of the scale *reachable*, which is the constraint
+that actually pins it down. A MAP estimate from ten items cannot run away: the prior pulls
+back harder than the likelihood pushes, so a flawless run on the hardest adaptive track
+tops out at θ ≈ 2.34 (R&W) / 2.36 (Math). The scale therefore has to clear 800 by θ ≈ 2.34
+or it cannot report 800 at all.
+
+An earlier version used 90 points per logit, which needed θ ≥ 3.11 for an 800 — a value
+this instrument can never produce. A flawless 20-question diagnostic reported **1420**, and
+even the top of its confidence range stopped at 1530. The floor was broken the same way: a
+test with every answer wrong could not report below about 630. `scoring.test.ts` now
+asserts both ends against the live blueprint, so a blueprint change that puts either end
+out of reach fails the build instead of quietly capping every student below their target.
+
+What a flawless diagnostic reports now:
+
+| Performance (hardest track)      | Total | Range     |
+| -------------------------------- | ----- | --------- |
+| 20/20                            | 1600  | 1450–1600 |
+| 18/20                            | 1500  | 1360–1600 |
+| 16/20                            | 1390  | 1260–1520 |
+| 14/20                            | 1300  | 1170–1430 |
+| 10/20                            | 1120  |  990–1250 |
+| 0/20 (foundations track)         |  500  |  400–650  |
 
 ## 7. Confidence range
 
@@ -103,7 +146,7 @@ Standard error comes from Fisher information plus the prior:
 SE(θ) = 1 / sqrt( Σᵢ wᵢ·pᵢ·(1 − pᵢ)  +  1 / 1.2² )
 ```
 
-Converted to score points (×90), then widened by penalties that reflect **evidence quality**
+Converted to score points (×120), then widened by penalties that reflect **evidence quality**
 rather than ability:
 
 | Signal                                             | Added half-width |
@@ -117,6 +160,12 @@ The reported band is an **80% interval** (z = 1.28), with a floor of ±30 points
 so the app never implies false precision, and a ceiling of ±140 so it stays readable.
 Section errors are combined in quadrature for the total, since they are independent
 estimates.
+
+The quadrature uses each section's **unclamped** half-width. A section resting against 800
+still carries its full uncertainty; it simply cannot express the upper half of it on a scale
+that stops there. Building the total from the displayed bounds instead would make a perfect
+section contribute a half-width of zero and report the total as `1600–1600` — certainty the
+model does not have.
 
 ## 8. Confidence level
 
@@ -163,6 +212,40 @@ The user-visible signals map onto the pipeline like this:
 | Unanswered questions                     | weight ×0.6 (step 3); range widening (step 7)       |
 | Answer changes                           | range widening (step 7); mistake classification     |
 | Consistency across difficulty levels     | range widening (step 7); careless-drag estimate     |
+
+---
+
+## Comparing attempts across forms
+
+The app ships 18 diagnostic forms. They are not 18 different tests: every form is built
+from one blueprint (`src/lib/diagnostic/blueprint.ts`) that fixes, for each of the 20
+positions, which section it belongs to, which content domain it draws from, and which
+difficulty bucket it uses. Form 12's third Math routing question is an Algebra MEDIUM item
+exactly as form 1's is. Only the specific question changes.
+
+That is what makes two attempts comparable. The score model above takes item difficulty as
+its input, so equal blueprints mean equal difficulty inputs, and a difference between two
+attempts reflects a difference in performance rather than a difference in the instrument.
+
+Three caveats apply when reading a change between attempts:
+
+1. **The instrument is identical; the items are not.** Two MEDIUM Algebra items are not
+   exactly equally hard. This residual form-to-form variation is not modelled and sits
+   inside the reported confidence range rather than being corrected out.
+2. **Sampling noise dominates small changes.** With a half-width of roughly 30–140 points,
+   consecutive attempts can differ by 30–60 points with no change in ability at all. The
+   hub says so directly rather than celebrating the difference. A rise is evidence only
+   once it clears the previous attempt's range, or once several attempts trend the same
+   way.
+3. **The trend line is least squares, not last-minus-first.** `scoreTrend` in
+   `src/lib/diagnostic/history.ts` fits a slope across every completed attempt and reports
+   points per attempt. It is deliberately shown only from the third attempt onward: from
+   two points, "points per attempt" is just the delta restated with an unearned air of
+   authority.
+
+Retaking a form you have already completed is allowed, and the hub labels it. Its questions
+are no longer novel to you, so treat that score as the least trustworthy kind of attempt —
+it measures recall of those items alongside ability.
 
 ---
 

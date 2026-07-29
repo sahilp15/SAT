@@ -37,27 +37,34 @@
 //
 // 5. CONTENT-DOMAIN CORRECTION
 //    A 10-item section cannot sample the four content domains in blueprint
-//    proportion. So a second ability estimate is computed per domain and
-//    recombined using the blueprint weights in taxonomy.ts, then blended:
-//      theta_final = 0.8 * theta_overall + 0.2 * theta_blueprint
-//    This nudges the estimate toward what the student would likely score on a
-//    properly-proportioned test, without letting one domain dominate.
+//    proportion, so the response weights from step 3 are re-proportioned toward
+//    the blueprint weights in taxonomy.ts:
+//      w_i *= clamp(0.5, 1.75, 1 + 0.2 * (target_share / observed_share - 1))
+//    then renormalized so sum(w) is unchanged. This happens inside the single
+//    estimate in step 4 — NOT by estimating each domain separately and
+//    averaging, which would apply the prior once per domain and shrink the
+//    result toward the middle five times over.
 //
 // 6. SCALED SCORE
 //    A documented linear anchor maps logits to the 200-800 section scale:
-//      theta = -3 -> 250,  theta = 0 -> 520,  theta = +3 -> 790
-//      score = clamp(200, 800, round((520 + 90 * theta) / 10) * 10)
-//    Scores are reported in multiples of 10, like the real exam.
+//      theta = -2.35 -> 240,  theta = 0 -> 520,  theta = +2.35 -> 800
+//      score = clamp(200, 800, round((520 + 120 * theta) / 10) * 10)
+//    Scores are reported in multiples of 10, like the real exam. The slope is
+//    set so that both ends of the scale are reachable by a 10-item estimate —
+//    see the SCORE_SLOPE comment below, which is the part most likely to be
+//    got wrong.
 //
 // 7. CONFIDENCE RANGE
 //    Standard error from Fisher information plus the prior:
 //      SE(theta) = 1 / sqrt( sum_i w_i * p_i * (1 - p_i)  +  1 / 1.2^2 )
-//    Converted to score units (x90), then widened by penalties that reflect
+//    Converted to score units (x120), then widened by penalties that reflect
 //    evidence quality rather than ability:
 //      + unanswered items, + rushed responses, + answer changes,
 //      + inconsistency (missing easy items while getting hard ones right)
 //    The reported band is an 80% interval (z = 1.28), with a floor of +/-30
-//    points per section so the app never implies false precision.
+//    points per section so the app never implies false precision. The total
+//    combines the two sections' UNCLAMPED half-widths in quadrature, so a
+//    section resting against 800 still contributes its real uncertainty.
 //
 // 8. CONFIDENCE LEVEL
 //    HIGH / MODERATE / LOW from the standard error, how many items were
@@ -85,9 +92,30 @@ export const THETA_MIN = -3.5;
 export const THETA_MAX = 3.5;
 export const THETA_STEP = 0.02;
 
-/** score = SCORE_ANCHOR + SCORE_SLOPE * theta, then clamped and rounded to 10s. */
+/**
+ * score = SCORE_ANCHOR + SCORE_SLOPE * theta, then clamped and rounded to 10s.
+ *
+ * SCORE_ANCHOR is the population mean section score. SCORE_SLOPE is one point of
+ * latent ability per ~1 standard deviation of the real section-score
+ * distribution, which is the usual IRT convention — and, not coincidentally, it
+ * is the slope that makes the top of the scale *reachable*.
+ *
+ * That last part is the constraint that actually pins the number down. A MAP
+ * estimate from ten items cannot run off to infinity: the N(0, PRIOR_SD^2) prior
+ * pulls back harder than the likelihood pushes, so a flawless run on the hardest
+ * adaptive track tops out at theta ~= 2.34 (R&W) / 2.36 (Math). At 90 points per
+ * logit — the previous value — reporting 800 needed theta >= 3.11, which this
+ * instrument can never produce. A perfect diagnostic scored 1420 and its
+ * confidence range stopped at 1530. The floor was wrong the same way: a blank
+ * test could not report below ~630.
+ *
+ * 280 points of headroom over 2.34 logits gives 119.7; 120 is the round number
+ * just above it, so a flawless diagnostic reports exactly 1600 in both sections
+ * and a hopeless one reports near the floor. `scoring.test.ts` asserts both ends
+ * against the live blueprint, so this stays true if the blueprint changes.
+ */
 export const SCORE_ANCHOR = 520;
-export const SCORE_SLOPE = 90;
+export const SCORE_SLOPE = 120;
 export const SECTION_MIN = 200;
 export const SECTION_MAX = 800;
 
@@ -97,6 +125,9 @@ export const MIN_HALF_WIDTH = 30;
 export const MAX_HALF_WIDTH = 140;
 
 export const BLUEPRINT_BLEND = 0.2;
+/** Bounds on the per-domain weight multiplier — see blueprintWeights. */
+export const MIN_DOMAIN_MULTIPLIER = 0.5;
+export const MAX_DOMAIN_MULTIPLIER = 1.75;
 export const RUSHED_FRACTION = 0.25;
 /** Spending more than this multiple of the recommended time counts as "slow". */
 export const SLOW_MULTIPLE = 2.0;
@@ -128,6 +159,13 @@ export interface SectionEstimate {
   score: number;
   low: number;
   high: number;
+  /**
+   * The interval's half-width *before* clamping to 200–800. `low` and `high` are
+   * clamped for display; this is what the total-score interval must be built
+   * from, or a section resting against either end of the scale would contribute
+   * zero uncertainty and imply a precision the model does not have.
+   */
+  halfWidth: number;
   correct: number;
   answered: number;
   total: number;
@@ -275,16 +313,64 @@ interface AbilityEstimate {
 }
 
 /**
+ * Per-response multipliers that re-proportion a section toward the official
+ * content blueprint. A domain the form over-samples relative to its blueprint
+ * share has each of its responses down-weighted, and vice versa.
+ *
+ * Two things keep this a nudge rather than a lever. The multipliers are damped
+ * by BLUEPRINT_BLEND, and they are clamped: a lone response in a domain the
+ * blueprint weights heavily would otherwise be scaled past 2x and end up
+ * speaking for the whole section. The caller renormalizes afterwards, so the
+ * correction moves *where* the evidence comes from, never how much there is.
+ */
+export function blueprintWeights(responses: ScoredResponse[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const res of responses) counts.set(res.domain, (counts.get(res.domain) ?? 0) + 1);
+  if (counts.size < 2) return new Map();
+
+  let weightSum = 0;
+  for (const domain of counts.keys()) weightSum += domainWeight(domain);
+  if (weightSum <= 0) return new Map();
+
+  const n = responses.length;
+  const out = new Map<string, number>();
+  for (const [domain, count] of counts) {
+    const target = domainWeight(domain) / weightSum; // share on a real test
+    const observed = count / n; // share on this form
+    const multiplier = 1 + BLUEPRINT_BLEND * (target / observed - 1);
+    out.set(domain, clamp(multiplier, MIN_DOMAIN_MULTIPLIER, MAX_DOMAIN_MULTIPLIER));
+  }
+  return out;
+}
+
+/**
  * MAP estimate of theta over a fixed grid with a N(0, PRIOR_SD^2) prior.
  * Returns the prior itself (theta = 0, se = PRIOR_SD) when there is no evidence.
+ *
+ * The blueprint correction is applied to the response weights *inside* this one
+ * estimate rather than by averaging separate per-domain estimates. Estimating
+ * each domain separately would apply the prior once per domain — five shrinkages
+ * averaged together instead of one — which biases every result toward the middle
+ * and, at 2–3 items per domain, biases it hard.
  */
-export function estimateAbility(responses: ScoredResponse[]): AbilityEstimate {
+export function estimateAbility(
+  responses: ScoredResponse[],
+  { blueprintCorrection = true }: { blueprintCorrection?: boolean } = {}
+): AbilityEstimate {
   if (responses.length === 0) return { theta: 0, se: PRIOR_SD };
 
-  const items = responses.map((res) => ({
+  const multipliers = blueprintCorrection ? blueprintWeights(responses) : new Map<string, number>();
+  const raw = responses.map((res) => responseWeight(res));
+  const corrected = responses.map((res, i) => raw[i] * (multipliers.get(res.domain) ?? 1));
+  // Renormalize so the blueprint correction cannot change the standard error.
+  const rawTotal = raw.reduce((s, w) => s + w, 0);
+  const correctedTotal = corrected.reduce((s, w) => s + w, 0);
+  const scale = correctedTotal > 0 ? rawTotal / correctedTotal : 1;
+
+  const items = responses.map((res, i) => ({
     b: ITEM_DIFFICULTY[res.difficulty],
     y: res.isCorrect ? 1 : 0,
-    w: responseWeight(res),
+    w: corrected[i] * scale,
   }));
 
   let bestTheta = 0;
@@ -311,37 +397,6 @@ export function estimateAbility(responses: ScoredResponse[]): AbilityEstimate {
   }
 
   return { theta: Number(bestTheta.toFixed(4)), se: 1 / Math.sqrt(info) };
-}
-
-/**
- * Re-weight the ability estimate toward the real blueprint. Each domain that
- * has responses gets its own theta; those are combined using blueprint weights
- * (renormalized over the domains actually sampled) and blended with the overall
- * estimate at BLUEPRINT_BLEND.
- */
-export function blueprintAdjustedTheta(
-  responses: ScoredResponse[],
-  overallTheta: number
-): number {
-  const byDomain = new Map<string, ScoredResponse[]>();
-  for (const res of responses) {
-    const list = byDomain.get(res.domain) ?? [];
-    list.push(res);
-    byDomain.set(res.domain, list);
-  }
-  if (byDomain.size < 2) return overallTheta;
-
-  let weightSum = 0;
-  let weighted = 0;
-  for (const [domain, list] of byDomain) {
-    const w = domainWeight(domain);
-    weighted += w * estimateAbility(list).theta;
-    weightSum += w;
-  }
-  if (weightSum === 0) return overallTheta;
-
-  const blueprintTheta = weighted / weightSum;
-  return (1 - BLUEPRINT_BLEND) * overallTheta + BLUEPRINT_BLEND * blueprintTheta;
 }
 
 /** Convert a latent ability to a 200–800 section score (multiples of 10). */
@@ -420,7 +475,7 @@ export function scoreSection(
   const correct = responses.filter((r) => r.isCorrect).length;
 
   const base = estimateAbility(responses);
-  const theta = blueprintAdjustedTheta(responses, base.theta);
+  const theta = base.theta;
   const score = thetaToScore(theta);
 
   const unanswered = total - answeredList.length;
@@ -448,6 +503,7 @@ export function scoreSection(
     score,
     low: boundToScore(score - halfWidth),
     high: boundToScore(score + halfWidth),
+    halfWidth,
     correct,
     answered: answeredList.length,
     total,
@@ -526,8 +582,8 @@ function buildTiming(section: Section, responses: ScoredResponse[]): TimingAnaly
 /**
  * Points likely lost to avoidable slips. For each section, count easy/medium
  * misses by a student who cleared at least one harder item, and price them
- * using the section's score-per-item sensitivity (~SCORE_SLOPE / 4 per item at
- * this test length). Reported as context — never added to the estimate.
+ * using the section's score-per-item sensitivity — about SCORE_SLOPE / 4 per
+ * item at this test length. Reported as context — never added to the estimate.
  */
 function carelessDrag(responses: ScoredResponse[]): number {
   let drag = 0;
@@ -538,7 +594,7 @@ function carelessDrag(responses: ScoredResponse[]): number {
     const slips = inSection.filter(
       (r) => !r.isCorrect && r.difficulty !== "HARD" && r.chosenAnswer
     ).length;
-    drag += slips * 20;
+    drag += slips * Math.round(SCORE_SLOPE / 4 / 10) * 10;
   }
   return drag;
 }
@@ -658,9 +714,12 @@ export function scoreDiagnostic(
 
   const total = clamp(math.score + rw.score, 400, 1600);
   // Section errors are combined in quadrature — they are independent estimates.
-  const mathHalf = math.high - math.score;
-  const rwHalf = rw.high - rw.score;
-  const totalHalf = Math.round(Math.sqrt(mathHalf * mathHalf + rwHalf * rwHalf));
+  // Uses the unclamped half-widths: a section sitting at 800 still carries its
+  // full uncertainty, it just cannot express the upper half of it on a scale
+  // that stops there.
+  const totalHalf = Math.round(
+    Math.sqrt(math.halfWidth * math.halfWidth + rw.halfWidth * rw.halfWidth)
+  );
   const totalLow = clamp(Math.round((total - totalHalf) / 10) * 10, 400, 1600);
   const totalHigh = clamp(Math.round((total + totalHalf) / 10) * 10, 400, 1600);
 

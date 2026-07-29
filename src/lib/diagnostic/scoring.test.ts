@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_DOMAIN_MULTIPLIER,
   MAX_HALF_WIDTH,
+  MIN_DOMAIN_MULTIPLIER,
   MIN_HALF_WIDTH,
   SECTION_MAX,
   SECTION_MIN,
@@ -11,8 +13,11 @@ import {
   scoreDiagnostic,
   scoreSection,
   thetaToScore,
+  blueprintWeights,
   type ScoredResponse,
 } from "./scoring";
+import { BLUEPRINT, SECTION_ORDER } from "./blueprint";
+import type { DiagnosticTrack } from "./form";
 import type { Difficulty, Section } from "../taxonomy";
 
 // A representative 10-question section: the real blueprint shape of five
@@ -60,8 +65,15 @@ const NONE = Array.from({ length: 10 }, () => false);
 describe("thetaToScore", () => {
   it("maps the documented anchors", () => {
     expect(thetaToScore(0)).toBe(520);
-    expect(thetaToScore(3)).toBe(790);
-    expect(thetaToScore(-3)).toBe(250);
+    expect(thetaToScore(1)).toBe(640);
+    expect(thetaToScore(-1)).toBe(400);
+  });
+
+  it("puts both ends of the scale inside reach of a 10-item estimate", () => {
+    // The prior caps a flawless run at theta ~2.35, so the slope has to clear
+    // 800 by then or the top of the scale is decoration.
+    expect(thetaToScore(2.35)).toBe(800);
+    expect(thetaToScore(-2.35)).toBe(240);
   });
 
   it("clamps to the 200–800 section scale", () => {
@@ -262,5 +274,164 @@ describe("scoreDiagnostic", () => {
     const result = scoreDiagnostic([]);
     expect(result.total).toBeGreaterThanOrEqual(400);
     expect(result.confidence).toBe("LOW");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reachability of the scale
+// ---------------------------------------------------------------------------
+//
+// These build responses from the *live* blueprint rather than a hand-written
+// shape, so if the blueprint changes in a way that puts 1600 out of reach, this
+// fails instead of quietly capping every student below their target.
+
+/** A full 20-item response set on a given track, with a correctness rule. */
+function fromBlueprint(
+  track: DiagnosticTrack,
+  isCorrect: (indexInSection: number, difficulty: Difficulty) => boolean
+): ScoredResponse[] {
+  const out: ScoredResponse[] = [];
+  for (const section of SECTION_ORDER) {
+    const bp = BLUEPRINT[section];
+    const slots = [
+      ...bp.routing.map((s) => ({ ...s, stage: "ROUTING" as const })),
+      ...bp.tracks[track].map((s) => ({ ...s, stage: "ADAPTIVE" as const })),
+    ];
+    slots.forEach((slot, i) => {
+      out.push({
+        questionId: `${section}-${i}`,
+        section,
+        stage: slot.stage,
+        domain: slot.domain,
+        skill: `${slot.domain} skill`,
+        subskill: null,
+        difficulty: slot.difficulty,
+        isCorrect: isCorrect(i, slot.difficulty),
+        chosenAnswer: "A",
+        correctAnswer: "A",
+        timeMs: 60_000,
+        recommendedSec: 90,
+        answerChanges: 0,
+        flagged: false,
+      });
+    });
+  }
+  return out;
+}
+
+const BOTH_HARD = { MATH: "HARD", READING_WRITING: "HARD" } as const;
+
+describe("the reportable range is actually reachable", () => {
+  it("gives a flawless diagnostic on the hardest track a perfect 1600", () => {
+    const score = scoreDiagnostic(fromBlueprint("HARD", () => true), BOTH_HARD);
+    expect(score.math.score).toBe(800);
+    expect(score.rw.score).toBe(800);
+    expect(score.total).toBe(1600);
+  });
+
+  it("lets a flawless diagnostic reach the top of every section range too", () => {
+    const score = scoreDiagnostic(fromBlueprint("HARD", () => true), BOTH_HARD);
+    expect(score.math.high).toBe(800);
+    expect(score.rw.high).toBe(800);
+    expect(score.totalHigh).toBe(1600);
+  });
+
+  it("does not claim certainty just because the estimate sits at the ceiling", () => {
+    // Clamping low and high to 800 must not collapse the interval to a point.
+    const score = scoreDiagnostic(fromBlueprint("HARD", () => true), BOTH_HARD);
+    expect(score.math.low).toBeLessThan(800);
+    expect(score.totalLow).toBeLessThan(1600);
+    expect(score.math.halfWidth).toBeGreaterThanOrEqual(MIN_HALF_WIDTH);
+  });
+
+  it("reaches the bottom of the scale when nothing is right", () => {
+    const score = scoreDiagnostic(fromBlueprint("EASY", () => false), {
+      MATH: "EASY",
+      READING_WRITING: "EASY",
+    });
+    expect(score.math.score).toBeLessThan(300);
+    expect(score.total).toBeLessThan(600);
+    expect(score.totalLow).toBeGreaterThanOrEqual(400);
+  });
+
+  it("costs real points for each miss instead of bunching everyone together", () => {
+    const at = (misses: number) =>
+      scoreDiagnostic(
+        fromBlueprint("HARD", (i) => i < 10 - misses),
+        BOTH_HARD
+      ).total;
+    const perfect = at(0);
+    const oneEach = at(1);
+    const twoEach = at(2);
+    expect(perfect).toBeGreaterThan(oneEach);
+    expect(oneEach).toBeGreaterThan(twoEach);
+    // A single miss per section should move the number meaningfully — not by
+    // ten points, and not off a cliff.
+    expect(perfect - oneEach).toBeGreaterThanOrEqual(40);
+    expect(perfect - oneEach).toBeLessThanOrEqual(200);
+  });
+
+  it("ranks the three tracks in order for an otherwise flawless run", () => {
+    const totalFor = (track: DiagnosticTrack) =>
+      scoreDiagnostic(fromBlueprint(track, () => true), {
+        MATH: track,
+        READING_WRITING: track,
+      }).total;
+    expect(totalFor("HARD")).toBeGreaterThan(totalFor("MEDIUM"));
+    expect(totalFor("MEDIUM")).toBeGreaterThan(totalFor("EASY"));
+  });
+});
+
+describe("blueprint correction", () => {
+  it("leaves a section alone when it is already in blueprint proportion", () => {
+    const even = build("MATH", ALL).map((r, i) => ({
+      ...r,
+      // One domain, so there is nothing to re-proportion.
+      domain: "Algebra",
+      skill: `Algebra ${i}`,
+    }));
+    expect(blueprintWeights(even).size).toBe(0);
+  });
+
+  it("compares each domain's share against the blueprint, not against the others", () => {
+    // SHAPE samples Geometry at 2/10 = 20% against a 15% blueprint share, and
+    // Algebra at 3/10 = 30% against 35% — so the *less* frequent domain is the
+    // over-sampled one here. Sampling more of a domain than a real test does is
+    // what earns a down-weight; being frequent is not.
+    const weights = blueprintWeights(build("MATH", ALL));
+    expect(weights.get("Geometry and Trigonometry")!).toBeLessThan(1);
+    expect(weights.get("Algebra")!).toBeGreaterThan(1);
+  });
+
+  it("keeps the correction bounded so one item cannot carry a section", () => {
+    // A domain sampled once against a 35% blueprint share would otherwise get a
+    // 3.5x multiplier; BLUEPRINT_BLEND holds the whole correction to a nudge.
+    const lopsided = build("MATH", ALL).map((r, i) => ({
+      ...r,
+      domain: i === 0 ? "Algebra" : "Geometry and Trigonometry",
+    }));
+    for (const multiplier of blueprintWeights(lopsided).values()) {
+      expect(multiplier).toBeGreaterThanOrEqual(MIN_DOMAIN_MULTIPLIER);
+      expect(multiplier).toBeLessThanOrEqual(MAX_DOMAIN_MULTIPLIER);
+    }
+  });
+
+  it("does not change how much evidence there is, only where it came from", () => {
+    // The correction redistributes weight; the standard error must not move as
+    // a side effect, or a lopsided form would look more or less certain than it
+    // is.
+    const responses = build("MATH", [true, true, false, true, false, true, false, true, true, false]);
+    const withCorrection = estimateAbility(responses);
+    const without = estimateAbility(responses, { blueprintCorrection: false });
+    expect(withCorrection.se).toBeCloseTo(without.se, 2);
+  });
+
+  it("does not drag a strong performance toward the middle", () => {
+    // The old implementation averaged separately-shrunk per-domain estimates,
+    // which applied the prior once per domain and biased both ends inward.
+    const perfect = fromBlueprint("HARD", () => true).filter((r) => r.section === "MATH");
+    const corrected = estimateAbility(perfect).theta;
+    const pooled = estimateAbility(perfect, { blueprintCorrection: false }).theta;
+    expect(Math.abs(corrected - pooled)).toBeLessThan(0.25);
   });
 });

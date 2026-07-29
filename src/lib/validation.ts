@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { DIFFICULTIES } from "./taxonomy";
+import { FORM_COUNT } from "./diagnostic/blueprint";
 
 export const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 export const STUDY_TIMES = ["MORNING", "AFTERNOON", "EVENING", "NIGHT"] as const;
@@ -67,6 +68,11 @@ export const diagnosticResponseSchema = z.object({
 });
 
 export const sessionIdSchema = z.object({ sessionId: z.string().min(1).max(64) });
+
+export const diagnosticStartSchema = z.object({
+  /** Which of the interchangeable diagnostic forms to open. */
+  formId: z.number().int().min(1).max(FORM_COUNT).optional(),
+});
 
 export const practiceSetSchema = z.object({
   section: z.enum(["MATH", "READING_WRITING"]).optional(),

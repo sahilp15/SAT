@@ -207,7 +207,8 @@ export function OnboardingFlow({
         } catch {
           /* nothing to clean up */
         }
-        router.push(choice === "diagnostic" ? "/diagnostic?start=1" : "/dashboard");
+        // "Take it now" means now — straight into diagnostic 1, not to the hub.
+        router.push(choice === "diagnostic" ? "/diagnostic/run?form=1" : "/dashboard");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
         setFinishing("none");
