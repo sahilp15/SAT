@@ -1,0 +1,9 @@
+{
+  "extends": ["next/core-web-vitals"],
+  "plugins": ["@typescript-eslint"],
+  "ignorePatterns": ["node_modules", ".next", "out", "build", "prisma/*.json"],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "@next/next/no-img-element": "warn"
+  }
+}

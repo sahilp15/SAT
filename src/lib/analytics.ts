@@ -1,159 +1,196 @@
-// Performance analytics derived from attempts, error logs, mastery, and SRS.
-// Pure DB reads + aggregation so both the dashboard and the analytics page can
-// reuse the same numbers.
+// Performance analytics derived from attempts, mastery, diagnoses, and SRS.
+// Pure DB reads plus aggregation, so the analytics page and the dashboard can
+// share one definition of every number.
 
 import { prisma } from "./db";
+import { toIsoDate } from "./testDate";
+import type { MasterySignal } from "./mastery";
+
+export interface TopicRow {
+  section: string;
+  domain: string;
+  skill: string;
+  attempts: number;
+  correct: number;
+  accuracy: number;
+  mastery: number;
+  delta: number;
+  signal: MasterySignal;
+  avgTimeMs: number | null;
+  byDifficulty: {
+    easy: { correct: number; total: number };
+    medium: { correct: number; total: number };
+    hard: { correct: number; total: number };
+  };
+}
 
 export interface Overview {
   answered: number;
   correct: number;
   missed: number;
-  accuracy: number; // 0..1
+  accuracy: number;
   errorLogsCompleted: number;
   srsDue: number;
   srsTotal: number;
-  bySection: { section: string; answered: number; accuracy: number }[];
-  byDifficulty: { difficulty: string; answered: number; accuracy: number }[];
-  byTopic: {
-    section: string;
-    domain: string;
-    skill: string;
-    attempts: number;
-    accuracy: number;
-    trend: number; // accuracy - prevAccuracy
-  }[];
+  avgTimeSec: number | null;
+  bySection: { section: string; answered: number; correct: number; accuracy: number }[];
+  byDifficulty: { difficulty: string; answered: number; correct: number; accuracy: number }[];
+  byDomain: { section: string; domain: string; attempts: number; accuracy: number }[];
+  topics: TopicRow[];
   mistakeTypes: { type: string; count: number }[];
   accuracyOverTime: { date: string; accuracy: number; count: number }[];
-  avgTimeSec: number | null;
+  volumeOverTime: { date: string; questions: number; minutes: number }[];
 }
+
+const DIFFICULTY_ORDER = ["EASY", "MEDIUM", "HARD"];
 
 export async function getOverview(userId: string): Promise<Overview> {
   const now = new Date();
 
-  const attempts = await prisma.questionAttempt.findMany({
-    where: { userId },
-    select: {
-      isCorrect: true,
-      timeMs: true,
-      createdAt: true,
-      question: { select: { section: true, difficulty: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  const [attempts, mastery, errorLogsCompleted, srsDue, srsTotal, diagnoses] = await Promise.all([
+    prisma.questionAttempt.findMany({
+      where: { userId },
+      select: {
+        isCorrect: true,
+        timeMs: true,
+        createdAt: true,
+        question: { select: { section: true, difficulty: true, domain: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.topicMastery.findMany({ where: { userId }, orderBy: { mastery: "asc" } }),
+    prisma.errorLog.count({ where: { userId } }),
+    prisma.srsItem.count({ where: { userId, active: true, dueDate: { lte: now } } }),
+    prisma.srsItem.count({ where: { userId, active: true } }),
+    prisma.mistakeDiagnosis.groupBy({ by: ["category"], where: { userId }, _count: true }),
+  ]);
 
   const answered = attempts.length;
   const correct = attempts.filter((a) => a.isCorrect).length;
-  const missed = answered - correct;
-  const accuracy = answered ? correct / answered : 0;
 
-  const sectionMap = new Map<string, { a: number; c: number }>();
-  const diffMap = new Map<string, { a: number; c: number }>();
-  for (const at of attempts) {
-    const s = at.question.section;
-    const d = at.question.difficulty;
-    const sm = sectionMap.get(s) ?? { a: 0, c: 0 };
-    sm.a++; if (at.isCorrect) sm.c++; sectionMap.set(s, sm);
-    const dm = diffMap.get(d) ?? { a: 0, c: 0 };
-    dm.a++; if (at.isCorrect) dm.c++; diffMap.set(d, dm);
+  const bucket = (keyOf: (a: (typeof attempts)[number]) => string) => {
+    const map = new Map<string, { total: number; correct: number }>();
+    for (const a of attempts) {
+      const key = keyOf(a);
+      const cur = map.get(key) ?? { total: 0, correct: 0 };
+      cur.total += 1;
+      if (a.isCorrect) cur.correct += 1;
+      map.set(key, cur);
+    }
+    return map;
+  };
+
+  const sectionMap = bucket((a) => a.question.section);
+  const diffMap = bucket((a) => a.question.difficulty);
+  const domainMap = bucket((a) => `${a.question.section}::${a.question.domain}`);
+
+  const dayMap = new Map<string, { total: number; correct: number; ms: number }>();
+  for (const a of attempts) {
+    const key = toIsoDate(a.createdAt);
+    const cur = dayMap.get(key) ?? { total: 0, correct: 0, ms: 0 };
+    cur.total += 1;
+    cur.ms += a.timeMs ?? 0;
+    if (a.isCorrect) cur.correct += 1;
+    dayMap.set(key, cur);
   }
+  const days = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
-  const bySection = [...sectionMap.entries()].map(([section, v]) => ({
-    section,
-    answered: v.a,
-    accuracy: v.a ? v.c / v.a : 0,
-  }));
-  const order = ["EASY", "MEDIUM", "HARD"];
-  const byDifficulty = [...diffMap.entries()]
-    .map(([difficulty, v]) => ({ difficulty, answered: v.a, accuracy: v.a ? v.c / v.a : 0 }))
-    .sort((x, y) => order.indexOf(x.difficulty) - order.indexOf(y.difficulty));
-
-  const mastery = await prisma.topicMastery.findMany({
-    where: { userId },
-    orderBy: { accuracy: "asc" },
-  });
-  const byTopic = mastery.map((m) => ({
-    section: m.section,
-    domain: m.domain,
-    skill: m.skill,
-    attempts: m.attempts,
-    accuracy: m.accuracy,
-    trend: m.accuracy - m.prevAccuracy,
-  }));
-
-  const errorLogsCompleted = await prisma.errorLog.count({ where: { userId } });
-  const srsDue = await prisma.srsItem.count({
-    where: { userId, active: true, dueDate: { lte: now } },
-  });
-  const srsTotal = await prisma.srsItem.count({ where: { userId, active: true } });
-
-  const logs = await prisma.errorLog.groupBy({
-    by: ["mistakeType"],
-    where: { userId },
-    _count: true,
-  });
-  const mistakeTypes = logs
-    .map((l) => ({ type: l.mistakeType, count: l._count }))
-    .sort((a, b) => b.count - a.count);
-
-  // Accuracy over time, bucketed by calendar day.
-  const dayMap = new Map<string, { a: number; c: number }>();
-  for (const at of attempts) {
-    const key = at.createdAt.toISOString().slice(0, 10);
-    const dm = dayMap.get(key) ?? { a: 0, c: 0 };
-    dm.a++; if (at.isCorrect) dm.c++; dayMap.set(key, dm);
-  }
-  const accuracyOverTime = [...dayMap.entries()].map(([date, v]) => ({
-    date,
-    accuracy: v.a ? v.c / v.a : 0,
-    count: v.a,
-  }));
-
-  const timed = attempts.filter((a) => a.timeMs != null) as { timeMs: number }[];
-  const avgTimeSec = timed.length
-    ? Math.round(timed.reduce((s, a) => s + a.timeMs, 0) / timed.length / 1000)
-    : null;
+  const timed = attempts.filter((a) => (a.timeMs ?? 0) > 0);
 
   return {
     answered,
     correct,
-    missed,
-    accuracy,
+    missed: answered - correct,
+    accuracy: answered ? correct / answered : 0,
     errorLogsCompleted,
     srsDue,
     srsTotal,
-    bySection,
-    byDifficulty,
-    byTopic,
-    mistakeTypes,
-    accuracyOverTime,
-    avgTimeSec,
+    avgTimeSec: timed.length
+      ? Math.round(timed.reduce((s, a) => s + (a.timeMs ?? 0), 0) / timed.length / 1000)
+      : null,
+    bySection: [...sectionMap.entries()].map(([section, v]) => ({
+      section,
+      answered: v.total,
+      correct: v.correct,
+      accuracy: v.total ? v.correct / v.total : 0,
+    })),
+    byDifficulty: [...diffMap.entries()]
+      .map(([difficulty, v]) => ({
+        difficulty,
+        answered: v.total,
+        correct: v.correct,
+        accuracy: v.total ? v.correct / v.total : 0,
+      }))
+      .sort(
+        (a, b) => DIFFICULTY_ORDER.indexOf(a.difficulty) - DIFFICULTY_ORDER.indexOf(b.difficulty)
+      ),
+    byDomain: [...domainMap.entries()].map(([key, v]) => {
+      const [section, domain] = key.split("::");
+      return { section, domain, attempts: v.total, accuracy: v.total ? v.correct / v.total : 0 };
+    }),
+    topics: mastery.map((m) => ({
+      section: m.section,
+      domain: m.domain,
+      skill: m.skill,
+      attempts: m.attempts,
+      correct: m.correct,
+      accuracy: m.accuracy,
+      mastery: m.mastery,
+      delta: m.mastery - m.prevMastery,
+      signal: (m.signal as MasterySignal | null) ?? "UNTESTED",
+      avgTimeMs: m.avgTimeMs,
+      byDifficulty: {
+        easy: { correct: m.easyCorrect, total: m.easyAttempts },
+        medium: { correct: m.mediumCorrect, total: m.mediumAttempts },
+        hard: { correct: m.hardCorrect, total: m.hardAttempts },
+      },
+    })),
+    mistakeTypes: diagnoses
+      .map((d) => ({ type: d.category, count: d._count }))
+      .sort((a, b) => b.count - a.count),
+    accuracyOverTime: days.map(([date, v]) => ({
+      date,
+      accuracy: v.correct / v.total,
+      count: v.total,
+    })),
+    volumeOverTime: days.map(([date, v]) => ({
+      date,
+      questions: v.total,
+      minutes: Math.round(v.ms / 60000),
+    })),
   };
 }
 
-/** Rough, deliberately conservative readiness estimate (NOT a score guarantee). */
-export function readinessEstimate(o: Overview, targetScore: number | null): {
-  label: string;
-  pct: number;
-  note: string;
-} {
+/**
+ * A deliberately conservative readiness signal. It is NOT a score prediction —
+ * the score predictor does that with a proper model. This gauges how much
+ * evidence there is and how good it looks.
+ */
+export function readinessEstimate(
+  o: Overview,
+  targetScore: number | null
+): { label: string; pct: number; note: string } {
   if (o.answered < 20) {
     return {
       label: "Not enough data yet",
-      pct: Math.min(100, (o.answered / 20) * 100),
-      note: "Answer at least 20 questions so estimates become meaningful.",
+      pct: Math.min(100, Math.round((o.answered / 20) * 100)),
+      note: "Answer at least 20 questions before these numbers mean much.",
     };
   }
-  // Blend overall accuracy with hard-question accuracy and coverage breadth.
   const hard = o.byDifficulty.find((d) => d.difficulty === "HARD");
   const hardAcc = hard?.accuracy ?? o.accuracy;
-  const coverage = Math.min(1, o.byTopic.length / 10);
-  const score = 0.5 * o.accuracy + 0.3 * hardAcc + 0.2 * coverage;
+  const coverage = Math.min(1, o.topics.length / 12);
+  const masteryAvg = o.topics.length
+    ? o.topics.reduce((s, t) => s + t.mastery, 0) / o.topics.length
+    : o.accuracy;
+
+  const score = 0.35 * o.accuracy + 0.25 * hardAcc + 0.2 * coverage + 0.2 * masteryAvg;
   const pct = Math.round(score * 100);
   const label = pct >= 85 ? "On track" : pct >= 65 ? "Building" : "Early";
   const target = targetScore ? ` toward ${targetScore}` : "";
   return {
     label,
     pct,
-    note: `A blended signal from accuracy, hard-question accuracy, and topic coverage. Keep going${target} — consistency is what moves scores.`,
+    note: `Blended from accuracy, hard-question accuracy, topic coverage, and average mastery. It measures preparation${target}, not a predicted score.`,
   };
 }

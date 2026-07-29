@@ -4,9 +4,15 @@
 // This seed is authoritative: it first DELETES every existing question (and its
 // answer choices / attempts / SRS items, via cascade) and then loads exactly the
 // questions in the bank. Running it replaces the question set wholesale.
+//
+// It also derives the structured study metadata for every item (subskill, SAT
+// relevance, calculator usefulness, target time) and marks the questions the
+// score predictor reserves, so the diagnostic never collides with practice.
 
 import { PrismaClient } from "@prisma/client";
 import { QUESTION_BANK } from "./questionBank";
+import { deriveQuestionMeta } from "../src/lib/questionMeta";
+import { diagnosticExternalIds } from "../src/lib/diagnostic/form";
 
 const prisma = new PrismaClient();
 const LOCAL_USER_EMAIL = "local@sat-prep.app";
@@ -30,29 +36,52 @@ async function main() {
   const removed = await prisma.question.deleteMany({});
   console.log(`Deleted ${removed.count} existing questions.`);
 
-  // Load the curated bank.
+  const diagnosticIds = new Set(diagnosticExternalIds());
   let inserted = 0;
+  let diagnosticFound = 0;
+
   for (const q of QUESTION_BANK) {
-    const data = {
-      externalId: q.externalId,
+    const meta = deriveQuestionMeta({
       section: q.section,
       domain: q.domain,
       skill: q.skill,
       difficulty: q.difficulty,
       format: q.format,
-      stimulus: q.stimulus ?? null,
       stem: q.stem,
-      correctAnswer: q.correctAnswer,
-      explanation: q.explanation,
-      source: "question-bank",
-      isBluebook: false,
-      requiresCalculator: q.requiresCalculator ?? q.section === "MATH",
-      desmosRelevant: q.desmosRelevant ?? q.section === "MATH",
-      isRegression: q.isRegression ?? false,
-      reviewStatus: q.reviewStatus ?? "OK",
-      importConfidence: 1.0,
-    };
-    const question = await prisma.question.create({ data });
+      stimulus: q.stimulus,
+      choices: q.choices,
+    });
+    const isDiagnostic = diagnosticIds.has(q.externalId);
+    if (isDiagnostic) diagnosticFound += 1;
+
+    const question = await prisma.question.create({
+      data: {
+        externalId: q.externalId,
+        section: q.section,
+        domain: q.domain,
+        skill: q.skill,
+        subskill: meta.subskill,
+        difficulty: q.difficulty,
+        format: q.format,
+        stimulus: q.stimulus ?? null,
+        stem: q.stem,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        source: "question-bank",
+        sourceType: "OFFICIAL_STYLE",
+        satRelevance: meta.satRelevance,
+        calculatorAppropriate: meta.calculatorAppropriate,
+        timeRecommendationSec: meta.timeRecommendationSec,
+        isDiagnostic,
+        isBluebook: false,
+        requiresCalculator: q.requiresCalculator ?? q.section === "MATH",
+        desmosRelevant: q.desmosRelevant ?? q.section === "MATH",
+        isRegression: q.isRegression ?? false,
+        reviewStatus: q.reviewStatus ?? "OK",
+        importConfidence: 1.0,
+      },
+    });
+
     if (q.choices.length > 0) {
       await prisma.answerChoice.createMany({
         data: q.choices.map((c) => ({
@@ -66,7 +95,14 @@ async function main() {
     }
     inserted++;
   }
+
   console.log(`Seeded ${inserted} questions from the bank.`);
+  console.log(`Reserved ${diagnosticFound}/${diagnosticIds.size} score-predictor questions.`);
+  if (diagnosticFound !== diagnosticIds.size) {
+    console.warn(
+      "WARNING: some diagnostic questions were not found in the bank. The score predictor will refuse to start until this is fixed."
+    );
+  }
 }
 
 main()

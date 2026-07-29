@@ -1,18 +1,18 @@
-import { PracticeLauncher } from "@/components/PracticeLauncher";
+import { PracticeSetup } from "@/components/practice/PracticeSetup";
 import { RW_TAXONOMY } from "@/lib/taxonomy";
+import { PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function ReadingWritingPage() {
+export default function ReadingWritingPracticePage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Reading & Writing</h1>
-        <p className="mt-1 text-slate-500">
-          Practice passages and questions. Every miss requires an error log before you move on.
-        </p>
-      </div>
-      <PracticeLauncher section="READING_WRITING" taxonomy={RW_TAXONOMY} />
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        eyebrow="Practice"
+        title="Reading &amp; Writing"
+        description="Drag to highlight or underline any passage, as you can in Bluebook. Every miss opens an error log before you can move on."
+      />
+      <PracticeSetup section="READING_WRITING" taxonomy={RW_TAXONOMY} />
     </div>
   );
 }

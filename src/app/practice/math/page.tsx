@@ -1,26 +1,19 @@
-import Link from "next/link";
-import { PracticeLauncher } from "@/components/PracticeLauncher";
+import { PracticeSetup } from "@/components/practice/PracticeSetup";
 import { MATH_TAXONOMY } from "@/lib/taxonomy";
+import { ArrowLink, PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function MathPage() {
+export default function MathPracticePage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Math</h1>
-        <p className="mt-1 text-slate-500">
-          Choose a mode below — including Desmos-friendly, non-Desmos, and regression practice. A
-          Desmos calculator is available on every math question.
-        </p>
-        <p className="mt-2 text-sm text-slate-500">
-          Looking for focused regression drills?{" "}
-          <Link href="/practice/regression" className="font-medium text-brand-600 hover:underline">
-            Open the regression trainer →
-          </Link>
-        </p>
-      </div>
-      <PracticeLauncher section="MATH" taxonomy={MATH_TAXONOMY} />
+    <div className="mx-auto max-w-3xl space-y-6">
+      <PageHeader
+        eyebrow="Practice"
+        title="Math"
+        description="A Desmos calculator is available on every question, exactly as on the digital test. Every miss opens an error log before you can move on."
+        actions={<ArrowLink href="/practice/regression">Regression trainer</ArrowLink>}
+      />
+      <PracticeSetup section="MATH" taxonomy={MATH_TAXONOMY} />
     </div>
   );
 }

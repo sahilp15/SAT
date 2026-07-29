@@ -84,7 +84,7 @@ export function ImportReview({ questions }: { questions: ReviewQuestion[] }) {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
       {/* List */}
       <div className="card max-h-[70vh] overflow-y-auto p-2">
         {list.map((q) => (
@@ -114,7 +114,7 @@ export function ImportReview({ questions }: { questions: ReviewQuestion[] }) {
           </div>
 
           <div className="card space-y-3">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className="label">Difficulty</label>
                 <select

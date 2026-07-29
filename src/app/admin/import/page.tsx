@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { Stat } from "@/components/ui";
+import { PageHeader, Stat } from "@/components/ui";
 import { ImportReview, type ReviewQuestion } from "@/components/ImportReview";
 
 export const dynamic = "force-dynamic";
@@ -45,20 +45,25 @@ export default async function ImportAdminPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Import &amp; Review</h1>
-        <p className="mt-1 text-slate-500">
-          Add SAT Question Bank exports (<code>.pdf</code> or <code>.txt</code>) to{" "}
-          <code>data/uploads/</code> and run <code>npm run import</code>. Items the parser
-          couldn&apos;t fully trust — usually math rendered as images, missing choices, or figures —
-          land here for a quick fix before they enter practice.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Admin"
+        title="Import &amp; review"
+        description={
+          <>
+            Add SAT Question Bank exports (<code className="font-mono">.pdf</code> or{" "}
+            <code className="font-mono">.txt</code>) to{" "}
+            <code className="font-mono">data/uploads/</code> and run{" "}
+            <code className="font-mono">npm run import</code>. Items the parser couldn&apos;t fully
+            trust — usually math rendered as images, missing choices, or figures — land here for a
+            quick fix before they enter practice.
+          </>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Total questions" value={total} />
-        <Stat label="Ready for practice" value={ok} />
-        <Stat label="Needs review" value={needsReview} />
+        <Stat label="Ready for practice" value={ok} tone="good" />
+        <Stat label="Needs review" value={needsReview} tone={needsReview > 0 ? "warn" : "good"} />
         <Stat label="Math / R&W" value={`${mathCount} / ${rwCount}`} />
       </div>
 
