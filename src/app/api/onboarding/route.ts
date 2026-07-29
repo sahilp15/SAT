@@ -1,56 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getLocalUser } from "@/lib/user";
 import { generateAndSavePlan } from "@/lib/planning";
+import { onboardingSchema, validationError } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-const schema = z.object({
-  grade: z.number().int().min(6).max(12).nullable().optional(),
-  satDateId: z.string().nullable().optional(),
-  targetScore: z.number().int().min(400).max(1600).nullable().optional(),
-  hasTakenOfficial: z.boolean().optional(),
-  lastOfficialTotal: z.number().int().min(400).max(1600).nullable().optional(),
-  hasTakenBluebook: z.boolean().optional(),
-  lastTotalScore: z.number().int().min(400).max(1600).nullable().optional(),
-  lastMathScore: z.number().int().min(200).max(800).nullable().optional(),
-  lastRwScore: z.number().int().min(200).max(800).nullable().optional(),
-  weeklyHours: z.number().int().min(0).max(80).nullable().optional(),
-  availableDays: z.array(z.string()).optional(),
-  strongerSection: z.enum(["MATH", "READING_WRITING", "BALANCED"]).nullable().optional(),
-  planIntensity: z.enum(["AGGRESSIVE", "BALANCED", "LIGHT"]).optional(),
-  diagnosticChoice: z.enum(["TAKE_TEST_1", "SKIP_AND_PRACTICE"]).nullable().optional(),
-});
-
+/**
+ * Saves onboarding answers. Called on every step (so backing out never loses
+ * work) and once more with `complete: true` at the end, which is when the plan
+ * is generated.
+ */
 export async function POST(req: NextRequest) {
   const user = await getLocalUser();
-  const parsed = schema.safeParse(await req.json());
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+
+  const parsed = onboardingSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json(validationError(parsed.error), { status: 400 });
   const d = parsed.data;
+
+  // Weekly hours stay in sync with the days x minutes the student actually
+  // committed to, so the planner and the legacy field never disagree.
+  const weeklyHours =
+    d.daysPerWeek != null && d.minutesPerDay != null
+      ? Math.max(1, Math.round((d.daysPerWeek * d.minutesPerDay) / 60))
+      : undefined;
+
   await prisma.studentProfile.update({
     where: { userId: user.id },
     data: {
       grade: d.grade ?? undefined,
       satDateId: d.satDateId ?? undefined,
+      testDate: d.testDate ?? undefined,
       targetScore: d.targetScore ?? undefined,
-      hasTakenOfficial: d.hasTakenOfficial ?? undefined,
-      lastOfficialTotal: d.lastOfficialTotal ?? undefined,
-      hasTakenBluebook: d.hasTakenBluebook ?? undefined,
+      priorTestType: d.priorTestType ?? undefined,
+      hasTakenOfficial: d.priorTestType === "SAT" ? true : undefined,
       lastTotalScore: d.lastTotalScore ?? undefined,
       lastMathScore: d.lastMathScore ?? undefined,
       lastRwScore: d.lastRwScore ?? undefined,
-      weeklyHours: d.weeklyHours ?? undefined,
-      availableDays: d.availableDays ? JSON.stringify(d.availableDays) : undefined,
       strongerSection: d.strongerSection ?? undefined,
+      weakerSection: d.weakerSection ?? undefined,
+      strugglingTopics: d.strugglingTopics ? JSON.stringify(d.strugglingTopics) : undefined,
+      daysPerWeek: d.daysPerWeek ?? undefined,
+      minutesPerDay: d.minutesPerDay ?? undefined,
+      weeklyHours,
+      availableDays: d.availableDays ? JSON.stringify(d.availableDays) : undefined,
+      preferredStudyTimes: d.preferredStudyTimes
+        ? JSON.stringify(d.preferredStudyTimes)
+        : undefined,
+      studyStyle: d.studyStyle ?? undefined,
+      wantsReminders: d.wantsReminders ?? undefined,
+      dailyGoalQuestions: d.dailyGoalQuestions ?? undefined,
       planIntensity: d.planIntensity ?? undefined,
       diagnosticChoice: d.diagnosticChoice ?? undefined,
-      onboardingComplete: true,
+      onboardingStep: d.onboardingStep ?? undefined,
+      onboardingComplete: d.complete ? true : undefined,
     },
   });
 
-  await generateAndSavePlan(user.id);
+  if (d.complete) await generateAndSavePlan(user.id);
+
   return NextResponse.json({ ok: true });
 }

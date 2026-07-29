@@ -1,36 +1,58 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { AppNav } from "@/components/AppNav";
-import { Footer } from "@/components/Footer";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+import { AppShell } from "@/components/shell/AppShell";
+import { ToastProvider } from "@/components/ui/Toast";
+import { getLocalUser } from "@/lib/user";
+import { getAppStatus } from "@/lib/status";
 
 export const metadata: Metadata = {
-  title: "SAT Prep — Personal Study System",
+  title: "SAT Studio — Personal Prep System",
   description:
-    "A private, local-first SAT prep app: personalized practice, forced error logs, spaced repetition, and progress tracking for Reading & Writing and Math.",
+    "A private, local-first SAT preparation system: adaptive score prediction, skill mastery tracking, an error log that resurfaces, and a plan built around your test date.",
 };
 
-// Applied before paint so the stored theme wins with no flash of the wrong one.
-const themeInit = `(function(){try{var t=localStorage.getItem('sat-theme');if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f2" },
+    { media: "(prefers-color-scheme: dark)", color: "#101216" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+};
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+// Applied before paint so the stored theme and sidebar state win with no flash
+// of the wrong one. Kept tiny and dependency-free on purpose.
+const BOOT_SCRIPT = `(function(){try{
+var t=localStorage.getItem('sat-theme');
+if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);}
+var r=localStorage.getItem('sat-rail');
+document.documentElement.setAttribute('data-rail', r==='1'?'1':'0');
+}catch(e){}})();`;
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const user = await getLocalUser();
+  const status = await getAppStatus(user.id);
+
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+        <script dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }} />
       </head>
-      <body className="min-h-screen font-sans">
-        <AppNav />
-        <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-          {children}
-        </main>
-        <Footer />
+      <body>
+        <ToastProvider>
+          <AppShell
+            status={{
+              daysRemaining: status.daysRemaining,
+              testLabel: status.testLabel,
+              streakDays: status.streakDays,
+              dueCount: status.dueCount,
+              predictedTotal: status.predictedTotal,
+              targetScore: status.targetScore,
+            }}
+          >
+            {children}
+          </AppShell>
+        </ToastProvider>
       </body>
     </html>
   );

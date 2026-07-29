@@ -2,6 +2,9 @@
 // Used by the API routes. Kept free of Next.js specifics so it stays testable.
 
 import { prisma } from "./db";
+import { analyzeMistake, type MistakeSignals } from "./diagnostic/mistakes";
+import { updateSkillMastery } from "./mastery";
+import type { Difficulty, Section } from "./taxonomy";
 import {
   computeNextReview,
   initialSrsState,
@@ -25,6 +28,7 @@ export interface ClientQuestion {
   section: string;
   domain: string;
   skill: string;
+  subskill: string | null;
   difficulty: string;
   format: string;
   stimulus: string | null;
@@ -32,15 +36,18 @@ export interface ClientQuestion {
   assets: string[];
   requiresCalculator: boolean;
   desmosRelevant: boolean;
+  calculatorAppropriate: boolean;
+  timeRecommendationSec: number | null;
   isRegression: boolean;
   choices: { label: string; content: string }[];
 }
 
-function toClientQuestion(q: {
+export interface QuestionRow {
   id: string;
   section: string;
   domain: string;
   skill: string;
+  subskill: string | null;
   difficulty: string;
   format: string;
   stimulus: string | null;
@@ -48,21 +55,38 @@ function toClientQuestion(q: {
   assets: string | null;
   requiresCalculator: boolean;
   desmosRelevant: boolean;
+  calculatorAppropriate: boolean;
+  timeRecommendationSec: number | null;
   isRegression: boolean;
   choices: { label: string; content: string }[];
-}): ClientQuestion {
+}
+
+/** Strip everything the client must not see (correct answer, rationales). */
+export function toClientQuestion(q: QuestionRow): ClientQuestion {
+  let assets: string[] = [];
+  if (q.assets) {
+    try {
+      const parsed: unknown = JSON.parse(q.assets);
+      if (Array.isArray(parsed)) assets = parsed.filter((a): a is string => typeof a === "string");
+    } catch {
+      assets = [];
+    }
+  }
   return {
     id: q.id,
     section: q.section,
     domain: q.domain,
     skill: q.skill,
+    subskill: q.subskill,
     difficulty: q.difficulty,
     format: q.format,
     stimulus: q.stimulus,
     stem: q.stem,
-    assets: q.assets ? (JSON.parse(q.assets) as string[]) : [],
+    assets,
     requiresCalculator: q.requiresCalculator,
     desmosRelevant: q.desmosRelevant,
+    calculatorAppropriate: q.calculatorAppropriate,
+    timeRecommendationSec: q.timeRecommendationSec,
     isRegression: q.isRegression,
     choices: q.choices.map((c) => ({ label: c.label, content: c.content })),
   };
@@ -97,8 +121,11 @@ export async function getNextQuestion(
     return srs ? toClientQuestion(srs.question) : null;
   }
 
+  // Diagnostic-reserved items are held back so the score predictor always sees
+  // questions the student has not already worked through in practice.
   const where: Record<string, unknown> = {
     isBluebook: false,
+    isDiagnostic: false,
     reviewStatus: "OK",
   };
   if (opts.section) where.section = opts.section;
@@ -135,6 +162,48 @@ export async function getNextQuestion(
   return q ? toClientQuestion(q) : null;
 }
 
+/**
+ * Build a fixed-length practice set for one skill — what a "Start this practice
+ * set" button on a recommendation opens. Unseen questions come first, then
+ * previously-missed ones, then anything else that matches.
+ */
+export async function getPracticeSet(
+  userId: string,
+  opts: { section?: string; skill?: string; domain?: string; difficulty?: string; count: number }
+): Promise<ClientQuestion[]> {
+  const where: Record<string, unknown> = {
+    isBluebook: false,
+    isDiagnostic: false,
+    reviewStatus: "OK",
+  };
+  if (opts.section) where.section = opts.section;
+  if (opts.skill) where.skill = opts.skill;
+  if (opts.domain) where.domain = opts.domain;
+  if (opts.difficulty) where.difficulty = opts.difficulty;
+
+  const count = Math.max(1, Math.min(40, opts.count));
+
+  const attempted = await prisma.questionAttempt.findMany({
+    where: { userId },
+    select: { questionId: true, isCorrect: true },
+    distinct: ["questionId"],
+  });
+  const seen = new Set(attempted.map((a) => a.questionId));
+  const missed = new Set(attempted.filter((a) => !a.isCorrect).map((a) => a.questionId));
+
+  const pool = await prisma.question.findMany({
+    where: where as never,
+    include: { choices: choiceSelect },
+    take: 200,
+  });
+
+  const rank = (q: { id: string }) => (seen.has(q.id) ? (missed.has(q.id) ? 1 : 2) : 0);
+  return pool
+    .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))
+    .slice(0, count)
+    .map(toClientQuestion);
+}
+
 export interface GradeResult {
   attemptId: string;
   isCorrect: boolean;
@@ -150,7 +219,7 @@ export interface GradeResult {
 }
 
 /** Normalize an SPR answer to a comparable numeric value (handles fractions). */
-function toNumber(s: string): number | null {
+export function toNumber(s: string): number | null {
   const t = s.trim().replace(/\s/g, "");
   if (/^-?\d+(\.\d+)?$/.test(t)) return parseFloat(t);
   const frac = t.match(/^(-?\d+)\/(\d+)$/);
@@ -159,6 +228,20 @@ function toNumber(s: string): number | null {
     if (d !== 0) return parseInt(frac[1], 10) / d;
   }
   return null;
+}
+
+/**
+ * Grade one answer. Shared by practice, spaced repetition, and the diagnostic so
+ * there is exactly one definition of "correct" in the app.
+ */
+export function gradeAnswer(
+  question: { format: string; correctAnswer: string },
+  chosenAnswer: string | null | undefined
+): boolean {
+  if (chosenAnswer == null || chosenAnswer.trim() === "") return false;
+  return question.format === "SPR"
+    ? gradeSpr(chosenAnswer, question.correctAnswer)
+    : chosenAnswer.trim().toUpperCase() === question.correctAnswer.trim().toUpperCase();
 }
 
 /** SPR grading: the stored correctAnswer may list several accepted forms. */
@@ -183,6 +266,8 @@ export async function recordAttempt(
     confidence?: Confidence | null;
     timeMs?: number;
     isReview?: boolean;
+    flagged?: boolean;
+    answerChanges?: number;
   }
 ): Promise<GradeResult> {
   const question = await prisma.question.findUniqueOrThrow({
@@ -190,10 +275,7 @@ export async function recordAttempt(
     include: { choices: { orderBy: { label: "asc" } } },
   });
 
-  const isCorrect =
-    question.format === "SPR"
-      ? gradeSpr(input.chosenAnswer, question.correctAnswer)
-      : input.chosenAnswer.trim().toUpperCase() === question.correctAnswer.trim().toUpperCase();
+  const isCorrect = gradeAnswer(question, input.chosenAnswer);
 
   const attempt = await prisma.questionAttempt.create({
     data: {
@@ -205,10 +287,35 @@ export async function recordAttempt(
       confidence: input.confidence ?? null,
       timeMs: input.timeMs ?? null,
       isReview: input.isReview ?? false,
+      flagged: input.flagged ?? false,
+      answerChanges: input.answerChanges ?? 0,
     },
   });
 
-  await updateTopicMastery(userId, question, isCorrect);
+  await updateSkillMastery({
+    userId,
+    section: question.section,
+    domain: question.domain,
+    skill: question.skill,
+    difficulty: question.difficulty,
+    isCorrect,
+    timeMs: input.timeMs ?? null,
+    recommendedSec: question.timeRecommendationSec,
+  });
+
+  // Record why it was missed so the error log has an answer immediately, with
+  // no dependency on the AI layer being available.
+  if (!isCorrect) {
+    await saveHeuristicDiagnosis({
+      userId,
+      attemptId: attempt.id,
+      question,
+      chosenAnswer: input.chosenAnswer,
+      timeMs: input.timeMs ?? 0,
+      answerChanges: input.answerChanges ?? 0,
+      flagged: input.flagged ?? false,
+    });
+  }
 
   // Spaced repetition.
   let requiresErrorLog = !isCorrect;
@@ -280,42 +387,95 @@ export async function recordAttempt(
   };
 }
 
-async function updateTopicMastery(
-  userId: string,
-  question: { section: string; domain: string; skill: string },
-  isCorrect: boolean
-) {
-  const key = {
-    userId_section_domain_skill: {
-      userId,
-      section: question.section,
-      domain: question.domain,
-      skill: question.skill,
+export interface DiagnosisQuestion {
+  id: string;
+  section: string;
+  domain: string;
+  skill: string;
+  subskill: string | null;
+  difficulty: string;
+  format: string;
+  correctAnswer: string;
+  explanation: string | null;
+  timeRecommendationSec: number | null;
+}
+
+/**
+ * Classify why a question was missed and store it. Runs on every miss, in
+ * practice and in the diagnostic, using only local heuristics — the AI route
+ * can later replace this row with a richer analysis.
+ */
+export async function saveHeuristicDiagnosis(input: {
+  userId: string;
+  attemptId: string;
+  question: DiagnosisQuestion;
+  chosenAnswer: string | null;
+  timeMs: number;
+  answerChanges: number;
+  flagged: boolean;
+  nearSectionEnd?: boolean;
+}) {
+  const { question } = input;
+
+  const priorMastery = await prisma.topicMastery.findUnique({
+    where: {
+      userId_section_domain_skill: {
+        userId: input.userId,
+        section: question.section,
+        domain: question.domain,
+        skill: question.skill,
+      },
     },
+    select: { accuracy: true, attempts: true },
+  });
+
+  const signals: MistakeSignals = {
+    section: question.section as Section,
+    domain: question.domain,
+    skill: question.skill,
+    subskill: question.subskill,
+    difficulty: question.difficulty as Difficulty,
+    format: question.format === "SPR" ? "SPR" : "MCQ",
+    chosenAnswer: input.chosenAnswer,
+    correctAnswer: question.correctAnswer,
+    timeMs: input.timeMs,
+    recommendedSec: question.timeRecommendationSec ?? 90,
+    answerChanges: input.answerChanges,
+    flagged: input.flagged,
+    priorSkillAccuracy: priorMastery?.accuracy ?? null,
+    priorSkillAttempts: priorMastery?.attempts ?? 0,
+    nearSectionEnd: input.nearSectionEnd,
   };
-  const existing = await prisma.topicMastery.findUnique({ where: key });
-  const attempts = (existing?.attempts ?? 0) + 1;
-  const correct = (existing?.correct ?? 0) + (isCorrect ? 1 : 0);
-  const accuracy = correct / attempts;
-  await prisma.topicMastery.upsert({
-    where: key,
+
+  const analysis = analyzeMistake(signals, question.explanation);
+
+  await prisma.mistakeDiagnosis.upsert({
+    where: { attemptId: input.attemptId },
     create: {
-      userId,
-      section: question.section,
-      domain: question.domain,
-      skill: question.skill,
-      attempts,
-      correct,
-      accuracy,
-      prevAccuracy: accuracy,
-      lastAttemptAt: new Date(),
+      userId: input.userId,
+      attemptId: input.attemptId,
+      category: analysis.category,
+      confidence: analysis.confidence,
+      testing: analysis.testing,
+      whyWrong: analysis.whyWrong,
+      whyCorrect: analysis.whyCorrect,
+      lesson: analysis.lesson,
+      nextStep: analysis.nextStep,
+      similarJson: JSON.stringify(analysis.similar),
+      source: "heuristic",
     },
     update: {
-      attempts,
-      correct,
-      prevAccuracy: existing?.accuracy ?? accuracy,
-      accuracy,
-      lastAttemptAt: new Date(),
+      category: analysis.category,
+      confidence: analysis.confidence,
+      testing: analysis.testing,
+      whyWrong: analysis.whyWrong,
+      whyCorrect: analysis.whyCorrect,
+      lesson: analysis.lesson,
+      nextStep: analysis.nextStep,
+      similarJson: JSON.stringify(analysis.similar),
+      source: "heuristic",
     },
   });
+
+  return analysis;
 }

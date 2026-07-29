@@ -1,30 +1,31 @@
 import { getLocalUser } from "@/lib/user";
 import { prisma } from "@/lib/db";
 import { PracticeTestManager } from "@/components/PracticeTestManager";
+import { PageHeader } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function PracticeTestsPage() {
   const user = await getLocalUser();
-  const scheduled = await prisma.practiceTestSchedule.findMany({
-    where: { userId: user.id, completed: false },
-    orderBy: { scheduledFor: "asc" },
-  });
-  const results = await prisma.practiceTestResult.findMany({
-    where: { userId: user.id },
-    orderBy: { takenOn: "desc" },
-    take: 10,
-  });
+  const [scheduled, results] = await Promise.all([
+    prisma.practiceTestSchedule.findMany({
+      where: { userId: user.id, completed: false },
+      orderBy: { scheduledFor: "asc" },
+    }),
+    prisma.practiceTestResult.findMany({
+      where: { userId: user.id },
+      orderBy: { takenOn: "desc" },
+      take: 10,
+    }),
+  ]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Practice Test Planner</h1>
-        <p className="mt-1 text-slate-500">
-          Schedule and log full-length Bluebook practice tests. Reserve official tests for realistic
-          diagnostics — the schedule spaces them strategically before your SAT.
-        </p>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-6">
+      <PageHeader
+        eyebrow="Practice tests"
+        title="Full-length tests"
+        description="The score predictor estimates from 20 questions; a full-length test is the only thing that measures stamina and real pacing. Take these in Bluebook under test conditions and log the results here — your plan re-plans around them."
+      />
       <PracticeTestManager
         scheduled={scheduled.map((t) => ({
           id: t.id,

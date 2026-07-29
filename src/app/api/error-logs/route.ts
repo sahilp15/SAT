@@ -2,18 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getLocalUser } from "@/lib/user";
 import { errorLogSchema } from "@/lib/errorLogValidation";
-import { reviewErrorLog } from "@/lib/ai";
+import { isAiConfigured, reviewErrorLog } from "@/lib/ai";
 import type { ErrorLogContext } from "@/lib/ai/prompts";
+import { validationError } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 45;
 
+/**
+ * Save an error-log reflection. Completeness is enforced locally; the AI review
+ * of reflection *quality* is a bonus that never blocks progress when it fails.
+ */
 export async function POST(req: NextRequest) {
   const user = await getLocalUser();
-  const body = await req.json();
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+
   const parsed = errorLogSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "incomplete", fields: parsed.error.flatten().fieldErrors },
+      { ...validationError(parsed.error), error: "incomplete" },
       { status: 400 }
     );
   }
@@ -24,10 +37,9 @@ export async function POST(req: NextRequest) {
     include: { question: true },
   });
   if (!attempt || attempt.userId !== user.id) {
-    return NextResponse.json({ error: "Attempt not found" }, { status: 404 });
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Create (or replace) the error log for this attempt.
   const existing = await prisma.errorLog.findUnique({ where: { attemptId: input.attemptId } });
   const baseData = {
     userId: user.id,
@@ -39,6 +51,7 @@ export async function POST(req: NextRequest) {
     mistakeType: input.mistakeType,
     whatDifferent: input.whatDifferent,
     confidenceAfter: input.confidenceAfter,
+    source: attempt.mode === "diagnostic" ? "diagnostic" : "practice",
   };
   const errorLog = existing
     ? await prisma.errorLog.update({
@@ -47,7 +60,23 @@ export async function POST(req: NextRequest) {
       })
     : await prisma.errorLog.create({ data: { attemptId: input.attemptId, ...baseData } });
 
-  // Server-side AI review of the reflection QUALITY (key never leaves the server).
+  const settings = await prisma.settings.findUnique({ where: { userId: user.id } });
+  const aiOn = isAiConfigured() && settings?.aiEnabled !== false;
+
+  if (!aiOn) {
+    await prisma.errorLog.update({
+      where: { id: errorLog.id },
+      data: { aiReviewStatus: "NOT_REVIEWED", aiFeedback: null },
+    });
+    return NextResponse.json({
+      status: "APPROVED",
+      aiConfigured: false,
+      feedback:
+        "Saved. AI review of your reflection is off — add an OPENAI_API_KEY to your .env to turn it on.",
+      errorLogId: errorLog.id,
+    });
+  }
+
   const ctx: ErrorLogContext = {
     section: attempt.question.section,
     domain: attempt.question.domain,
@@ -66,23 +95,8 @@ export async function POST(req: NextRequest) {
   };
   const review = await reviewErrorLog(ctx);
 
-  if (!review.configured) {
-    // No AI key: the completeness gate above is the bar. Allow continuing.
-    await prisma.errorLog.update({
-      where: { id: errorLog.id },
-      data: { aiReviewStatus: "NOT_REVIEWED", aiFeedback: null },
-    });
-    return NextResponse.json({
-      status: "APPROVED",
-      aiConfigured: false,
-      feedback:
-        "Saved. (AI review is off — add an OPENAI_API_KEY to get feedback on your reflections.)",
-      errorLogId: errorLog.id,
-    });
-  }
-
-  if (review.error || !review.data) {
-    // AI errored: don't block the student on infra problems.
+  if (!review.ok) {
+    // Infrastructure problems must never trap a student mid-session.
     await prisma.errorLog.update({
       where: { id: errorLog.id },
       data: { aiReviewStatus: "NOT_REVIEWED" },
@@ -90,16 +104,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       status: "APPROVED",
       aiConfigured: true,
-      feedback: "Saved. (AI review was unavailable just now.)",
+      feedback: `Saved. AI review was unavailable just now (${review.reason.toLowerCase().replace(/_/g, " ")}).`,
       errorLogId: errorLog.id,
     });
   }
 
-  const { verdict, feedback, rubricScores, model } = review.data;
+  const { verdict, feedback, rubricScores } = review.data;
   await prisma.aiReview.create({
     data: {
       errorLogId: errorLog.id,
-      model,
+      model: review.model,
       verdict,
       feedback,
       rubricScores: JSON.stringify(rubricScores),

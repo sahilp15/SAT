@@ -5,82 +5,520 @@
 /* KaTeX styles for math rendering (bundled locally — works offline) */
 @import "katex/dist/katex.min.css";
 
-/* ---------------------------------------------------------------------------
-   Design tokens. Light + dark are defined at the token level so components
-   never branch on theme; the viewer's toggle stamps data-theme on <html>.
---------------------------------------------------------------------------- */
+/* ===========================================================================
+   DESIGN SYSTEM
+   ---------------------------------------------------------------------------
+   Direction: an instrument, not a dashboard. Warm paper neutrals, one deep
+   ink-blue accent that carries every primary action, and a warm gold reserved
+   exclusively for goals and streaks so progress reads differently from
+   navigation. Data is set in a monospace face on tabular figures; long-form
+   passages use a reading serif that mirrors the digital test.
+
+   Type uses offline-safe stacks rather than a webfont request: this app is
+   local-first and must build and run with no network. The stacks lead with
+   genuinely characterful faces (Charter, Palatino, Avenir Next, SF Mono) and
+   degrade through widely-installed alternatives.
+
+   Every color is a token. Components never hardcode a hex value, which is what
+   makes light and dark one implementation instead of two.
+   =========================================================================== */
+
 :root {
-  --bg: #f4f6fb;
+  /* --- Typography ------------------------------------------------------- */
+  --font-display: "Charter", "Iowan Old Style", "Palatino Linotype", Palatino,
+    "Book Antiqua", Georgia, "Times New Roman", serif;
+  --font-sans: "Avenir Next", "Segoe UI Variable Text", "Segoe UI", -apple-system,
+    BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "SF Mono", "SFMono-Regular", "Cascadia Mono", "JetBrains Mono",
+    "Roboto Mono", ui-monospace, "Liberation Mono", monospace;
+  --font-reading: "Charter", "Iowan Old Style", Georgia, Cambria,
+    "Times New Roman", serif;
+
+  /* --- Radii ------------------------------------------------------------ */
+  --r-sm: 0.375rem;
+  --r-md: 0.625rem;
+  --r-lg: 0.875rem;
+  --r-xl: 1.125rem;
+  --r-2xl: 1.5rem;
+
+  /* --- Motion ----------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+
+  /* --- Light theme ------------------------------------------------------ */
+  --paper: #f5f5f2;
   --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --border: #e5e9f2;
-  --border-strong: #d3d9e6;
-  --ink: #1b2130;
-  --ink-soft: #444c60;
-  --ink-faint: #6b7488;
-  --accent: #274bd6;
-  --accent-weak: #eef3ff;
-  --good: #0b8a5f;
-  --good-weak: #e6f6ef;
-  --bad: #d1435b;
-  --bad-weak: #fdecef;
-  --warn: #b5730b;
+  --surface-2: #f0f0ec;
+  --surface-3: #e7e7e1;
+  --line: #e2e2da;
+  --line-strong: #c9c9bd;
+
+  --ink: #17181c;
+  --ink-2: #454a54;
+  --ink-3: #6f7683;
+
+  --accent: #1f3d99;
+  --accent-2: #2a51c4;
+  --accent-weak: #e9edfb;
+  --accent-contrast: #ffffff;
+
+  --gold: #9a6207;
+  --gold-weak: #fbf0da;
+  --good: #146a4a;
+  --good-weak: #e0f1e9;
+  --bad: #a32741;
+  --bad-weak: #fbe7ec;
+  --warn: #8a5606;
+  --warn-weak: #fbefd9;
+
   --highlight: #ffe37a;
+
+  --shadow-xs: 0 1px 2px rgb(20 22 28 / 0.05);
+  --shadow-card: 0 1px 2px rgb(20 22 28 / 0.04), 0 1px 3px rgb(20 22 28 / 0.06);
+  --shadow-raised: 0 2px 4px rgb(20 22 28 / 0.05), 0 8px 20px -8px rgb(20 22 28 / 0.14);
+  --shadow-pop: 0 4px 8px rgb(20 22 28 / 0.06), 0 16px 40px -12px rgb(20 22 28 / 0.24);
+
+  color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0f1420;
-  --surface: #171d2b;
-  --surface-2: #1c2333;
-  --border: #2a3346;
-  --border-strong: #38435c;
-  --ink: #eef1f7;
-  --ink-soft: #c2c9d8;
-  --ink-faint: #8b95ab;
-  --accent: #7ea0ff;
-  --accent-weak: #1e2942;
-  --good: #4ade9f;
-  --good-weak: #16302a;
-  --bad: #ff8095;
-  --bad-weak: #331f26;
-  --warn: #e0a54a;
+  --paper: #101216;
+  --surface: #171a20;
+  --surface-2: #1d2129;
+  --surface-3: #252a34;
+  --line: #2a2f3a;
+  --line-strong: #3c4353;
+
+  --ink: #eceef2;
+  --ink-2: #b6bcc9;
+  --ink-3: #8a92a1;
+
+  --accent: #8fabff;
+  --accent-2: #a9beff;
+  --accent-weak: #1b2540;
+  --accent-contrast: #0d1220;
+
+  --gold: #e0ac5a;
+  --gold-weak: #33291a;
+  --good: #57d3a0;
+  --good-weak: #123029;
+  --bad: #ff879c;
+  --bad-weak: #351d24;
+  --warn: #e3b25f;
+  --warn-weak: #332a17;
+
   --highlight: #d8b23a;
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.25);
+  --shadow-raised: 0 2px 4px rgb(0 0 0 / 0.3), 0 8px 20px -8px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 4px 8px rgb(0 0 0 / 0.35), 0 16px 40px -12px rgb(0 0 0 / 0.6);
+
+  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1420;
-    --surface: #171d2b;
-    --surface-2: #1c2333;
-    --border: #2a3346;
-    --border-strong: #38435c;
-    --ink: #eef1f7;
-    --ink-soft: #c2c9d8;
-    --ink-faint: #8b95ab;
-    --accent: #7ea0ff;
-    --accent-weak: #1e2942;
-    --good: #4ade9f;
-    --good-weak: #16302a;
-    --bad: #ff8095;
-    --bad-weak: #331f26;
-    --warn: #e0a54a;
+    --paper: #101216;
+    --surface: #171a20;
+    --surface-2: #1d2129;
+    --surface-3: #252a34;
+    --line: #2a2f3a;
+    --line-strong: #3c4353;
+
+    --ink: #eceef2;
+    --ink-2: #b6bcc9;
+    --ink-3: #8a92a1;
+
+    --accent: #8fabff;
+    --accent-2: #a9beff;
+    --accent-weak: #1b2540;
+    --accent-contrast: #0d1220;
+
+    --gold: #e0ac5a;
+    --gold-weak: #33291a;
+    --good: #57d3a0;
+    --good-weak: #123029;
+    --bad: #ff879c;
+    --bad-weak: #351d24;
+    --warn: #e3b25f;
+    --warn-weak: #332a17;
+
     --highlight: #d8b23a;
+
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.25);
+    --shadow-raised: 0 2px 4px rgb(0 0 0 / 0.3), 0 8px 20px -8px rgb(0 0 0 / 0.5);
+    --shadow-pop: 0 4px 8px rgb(0 0 0 / 0.35), 0 16px 40px -12px rgb(0 0 0 / 0.6);
+
+    color-scheme: dark;
   }
 }
 
-html,
-body {
-  max-width: 100vw;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+  }
+
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::placeholder {
+    color: var(--ink-3);
+    opacity: 1;
+  }
+
+  /* One consistent, always-visible focus treatment for keyboard users. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+
+  * {
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
 }
 
-body {
-  color: var(--ink);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+@layer components {
+  /* --- Surfaces --------------------------------------------------------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .card-flat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+  }
+  .card-inset {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+  }
+
+  /* --- Buttons ---------------------------------------------------------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--r-md);
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    user-select: none;
+    transition:
+      background-color var(--dur) var(--ease-out),
+      border-color var(--dur) var(--ease-out),
+      color var(--dur) var(--ease-out),
+      box-shadow var(--dur) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .btn:not(:disabled):active {
+    transform: translateY(0.5px);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border: 1px solid var(--accent);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+    box-shadow: var(--shadow-raised);
+  }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--ink-2);
+    border: 1px solid var(--line-strong);
+  }
+  .btn-secondary:not(:disabled):hover {
+    background: var(--surface-2);
+    color: var(--ink);
+    border-color: var(--ink-3);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink-2);
+    border: 1px solid transparent;
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+
+  .btn-danger {
+    background: var(--surface);
+    color: var(--bad);
+    border: 1px solid var(--bad);
+  }
+  .btn-danger:not(:disabled):hover {
+    background: var(--bad-weak);
+  }
+
+  .btn-lg {
+    padding: 0.6875rem 1.125rem;
+    font-size: 0.9375rem;
+  }
+  .btn-sm {
+    padding: 0.3125rem 0.625rem;
+    font-size: 0.8125rem;
+  }
+  .btn-icon {
+    padding: 0.5rem;
+  }
+
+  /* --- Forms ------------------------------------------------------------ */
+  .label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    margin-bottom: 0.375rem;
+  }
+  .hint {
+    font-size: 0.8125rem;
+    color: var(--ink-3);
+    line-height: 1.45;
+  }
+  .input {
+    display: block;
+    width: 100%;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition:
+      border-color var(--dur) var(--ease-out),
+      box-shadow var(--dur) var(--ease-out);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .input:disabled {
+    background: var(--surface-2);
+    color: var(--ink-3);
+    cursor: not-allowed;
+  }
+  .input[aria-invalid="true"] {
+    border-color: var(--bad);
+  }
+  select.input {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+      linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+    background-position:
+      calc(100% - 16px) calc(50% + 1px),
+      calc(100% - 11px) calc(50% + 1px);
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 2rem;
+  }
+  textarea.input {
+    line-height: 1.55;
+    resize: vertical;
+  }
+
+  /* --- Chips ------------------------------------------------------------ */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.015em;
+    white-space: nowrap;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border: 1px solid transparent;
+  }
+
+  /* --- Toggleable options (onboarding, filters, tutor modes) ------------ */
+  .option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: var(--r-md);
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    color: var(--ink-2);
+    padding: 0.4375rem 0.8125rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition:
+      background-color var(--dur) var(--ease-out),
+      border-color var(--dur) var(--ease-out),
+      color var(--dur) var(--ease-out);
+  }
+  .option:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .option[aria-pressed="true"],
+  .option[data-active="true"] {
+    background: var(--accent-weak);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* --- Navigation ------------------------------------------------------- */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6875rem;
+    border-radius: var(--r-md);
+    padding: 0.4375rem 0.625rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--ink-2);
+    transition:
+      background-color var(--dur) var(--ease-out),
+      color var(--dur) var(--ease-out);
+  }
+  .nav-item:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .nav-item[aria-current="page"] {
+    background: var(--accent-weak);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* --- Section headings ------------------------------------------------- */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* --- Reading ---------------------------------------------------------- */
+  .passage {
+    font-family: var(--font-reading);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+
+  /* --- Loading skeleton ------------------------------------------------- */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-2);
+    border-radius: var(--r-sm);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--surface) 70%, transparent),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
 }
 
-/* KaTeX sizing so inline math sits on the text baseline cleanly. */
+/* ---------------------------------------------------------------------------
+   App shell.
+   The rail (collapsed) state is driven by a `data-rail` attribute stamped on
+   <html> before paint, so widths are correct on the very first frame and the
+   sidebar never visibly snaps after hydration.
+--------------------------------------------------------------------------- */
+:root {
+  --sidebar-w: 15rem;
+  --rail-w: 4.25rem;
+}
+
+.app-sidebar {
+  width: var(--sidebar-w);
+  transition: width var(--dur) var(--ease-out);
+}
+.app-main {
+  transition: padding-left var(--dur) var(--ease-out);
+}
+@media (min-width: 1024px) {
+  .app-main {
+    padding-left: var(--sidebar-w);
+  }
+  html[data-rail="1"] .app-sidebar {
+    width: var(--rail-w);
+  }
+  html[data-rail="1"] .app-main {
+    padding-left: var(--rail-w);
+  }
+}
+html[data-rail="1"] .rail-hide {
+  display: none;
+}
+html[data-rail="1"] .rail-center {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* --- Math + annotation (carried over from the testing UI) ---------------- */
 .katex {
   font-size: 1.04em;
 }
@@ -89,25 +527,13 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
 }
-
-/* Reading passage: serif, comfortable measure, like the digital test. */
-.passage {
-  font-family: theme("fontFamily.serif");
-  font-size: 1.02rem;
-  line-height: 1.75;
-  color: var(--ink);
-}
-
-/* Math prose — mathematical expressions inside render via KaTeX; the wrapper
-   just gives comfortable spacing. */
 .mathprose {
   line-height: 1.7;
 }
 
-/* Text annotation (highlight / underline) applied to user selections. */
 mark.hl {
   background: var(--highlight);
-  color: inherit;
+  color: var(--ink);
   border-radius: 2px;
   padding: 0.02em 0;
   box-decoration-break: clone;
@@ -119,8 +545,6 @@ mark.hl {
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
-
-/* CSS Custom Highlight API: drawn from live Ranges, no DOM mutation. */
 ::highlight(sat-hl) {
   background-color: var(--highlight);
   color: var(--ink);
@@ -131,94 +555,14 @@ mark.hl {
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
-
-/* Selection color that reads as an annotation-in-progress. */
 .annotatable ::selection {
   background: color-mix(in srgb, var(--highlight) 70%, transparent);
 }
 
-/* ---------------------------------------------------------------------------
-   Component layer
---------------------------------------------------------------------------- */
-@layer components {
-  .card {
-    @apply rounded-xl border p-5;
-    background: var(--surface);
-    border-color: var(--border);
-    box-shadow: theme("boxShadow.card");
-  }
-  .surface {
-    background: var(--surface);
-    border-color: var(--border);
-  }
-  .btn {
-    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
-  }
-  .btn-primary {
-    @apply btn text-white;
-    background: var(--accent);
-  }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.06);
-    box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--accent) 55%, transparent);
-  }
-  .btn-secondary {
-    @apply btn border;
-    background: var(--surface);
-    border-color: var(--border-strong);
-    color: var(--ink-soft);
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--surface-2);
-    color: var(--ink);
-  }
-  .btn-ghost {
-    @apply btn;
-    color: var(--ink-soft);
-  }
-  .btn-ghost:hover:not(:disabled) {
-    background: var(--surface-2);
-    color: var(--ink);
-  }
-  .label {
-    @apply block text-sm font-medium;
-    color: var(--ink-soft);
-  }
-  .input {
-    @apply mt-1 block w-full rounded-lg border px-3 py-2 text-sm outline-none transition;
-    background: var(--surface);
-    border-color: var(--border-strong);
-    color: var(--ink);
-  }
-  .input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-  .chip {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
-  }
-  .toolbtn {
-    @apply inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors;
-    background: var(--surface);
-    border-color: var(--border-strong);
-    color: var(--ink-soft);
-  }
-  .toolbtn:hover:not(:disabled) {
-    background: var(--surface-2);
-    color: var(--ink);
-  }
-  .toolbtn[data-active="true"] {
-    background: var(--accent-weak);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-}
-
-/* Focus-visible ring for keyboard users across interactive elements. */
-:where(button, a, input, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 6px;
+/* Wide content scrolls inside its own container; the page never does. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -226,49 +570,8 @@ mark.hl {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
-}
-
-/* ---------------------------------------------------------------------------
-   Dark-theme safety net. A handful of page files still use hardcoded Tailwind
-   slate/white utilities; remap those specific ones to tokens under dark so no
-   text or surface is ever invisible. Components already use tokens directly.
-   Written flat (no CSS nesting) to stay pipeline-agnostic.
---------------------------------------------------------------------------- */
-:root[data-theme="dark"] .text-slate-900,
-:root[data-theme="dark"] .text-slate-800,
-:root:not([data-theme="light"]) .text-slate-900,
-:root:not([data-theme="light"]) .text-slate-800 {
-  color: var(--ink);
-}
-:root[data-theme="dark"] .text-slate-700,
-:root[data-theme="dark"] .text-slate-600,
-:root:not([data-theme="light"]) .text-slate-700,
-:root:not([data-theme="light"]) .text-slate-600 {
-  color: var(--ink-soft);
-}
-:root[data-theme="dark"] .text-slate-500,
-:root[data-theme="dark"] .text-slate-400,
-:root:not([data-theme="light"]) .text-slate-500,
-:root:not([data-theme="light"]) .text-slate-400 {
-  color: var(--ink-faint);
-}
-:root[data-theme="dark"] .bg-white,
-:root:not([data-theme="light"]) .bg-white {
-  background-color: var(--surface);
-}
-:root[data-theme="dark"] .bg-slate-50,
-:root[data-theme="dark"] .bg-slate-100,
-:root[data-theme="dark"] .bg-brand-50,
-:root:not([data-theme="light"]) .bg-slate-50,
-:root:not([data-theme="light"]) .bg-slate-100,
-:root:not([data-theme="light"]) .bg-brand-50 {
-  background-color: var(--surface-2);
-}
-:root[data-theme="dark"] .border-slate-200,
-:root[data-theme="dark"] .border-slate-300,
-:root:not([data-theme="light"]) .border-slate-200,
-:root:not([data-theme="light"]) .border-slate-300 {
-  border-color: var(--border);
 }

@@ -28,15 +28,21 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  profile           StudentProfile?
-  settings          Settings?
-  attempts          QuestionAttempt[]
-  errorLogs         ErrorLog[]
-  srsItems          SrsItem[]
-  studyPlans        StudyPlan[]
-  practiceSchedules PracticeTestSchedule[]
-  practiceResults   PracticeTestResult[]
-  topicMastery      TopicMastery[]
+  profile            StudentProfile?
+  settings           Settings?
+  attempts           QuestionAttempt[]
+  errorLogs          ErrorLog[]
+  srsItems           SrsItem[]
+  studyPlans         StudyPlan[]
+  practiceSchedules  PracticeTestSchedule[]
+  practiceResults    PracticeTestResult[]
+  topicMastery       TopicMastery[]
+  diagnosticSessions DiagnosticSession[]
+  diagnosticResults  DiagnosticResult[]
+  mistakeDiagnoses   MistakeDiagnosis[]
+  recommendations    SkillRecommendation[]
+  planDays           StudyPlanDay[]
+  tutorMessages      TutorMessage[]
 }
 
 model StudentProfile {
@@ -44,26 +50,39 @@ model StudentProfile {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  grade           Int? // e.g. 9, 10, 11, 12
-  satDateId       String? // references an entry in config/sat-dates.json (by id)
-  targetScore     Int? // 400–1600
+  grade               Int? // e.g. 9, 10, 11, 12
+  satDateId           String? // references an entry in config/sat-dates.json (by id)
+  // Authoritative test date as ISO "YYYY-MM-DD". Set from onboarding (which may
+  // offer a custom date); satDateId is kept for the config-list label.
+  testDate            String?
+  targetScore         Int? // 400–1600
   // Diagnostic history
-  hasTakenOfficial Boolean @default(false)
-  lastOfficialTotal Int?
-  hasTakenBluebook  Boolean @default(false)
-  lastTotalScore    Int?
-  lastMathScore     Int? // 200–800
-  lastRwScore       Int? // 200–800
+  hasTakenOfficial    Boolean @default(false)
+  lastOfficialTotal   Int?
+  hasTakenBluebook    Boolean @default(false)
+  lastTotalScore      Int?
+  lastMathScore       Int? // 200–800
+  lastRwScore         Int? // 200–800
+  priorTestType       String? // "SAT" | "PSAT" | "PRACTICE" | "NONE"
   // Availability & preferences
-  weeklyHours     Int? // realistic study hours per week
-  availableDays   String? // JSON array of day names, e.g. ["Mon","Wed","Sat"]
-  strongerSection String? // "MATH" | "READING_WRITING" | "BALANCED"
-  planIntensity   String  @default("BALANCED") // "AGGRESSIVE" | "BALANCED" | "LIGHT"
-  diagnosticChoice String? // "TAKE_TEST_1" | "SKIP_AND_PRACTICE"
+  weeklyHours         Int? // realistic study hours per week (derived from days x minutes)
+  daysPerWeek         Int? // 1–7
+  minutesPerDay       Int? // typical minutes available on a study day
+  availableDays       String? // JSON array of day names, e.g. ["Mon","Wed","Sat"]
+  strongerSection     String? // "MATH" | "READING_WRITING" | "BALANCED"
+  weakerSection       String? // "MATH" | "READING_WRITING" | "BALANCED"
+  strugglingTopics    String? // JSON array of skill names the student self-reports
+  studyStyle          String? // "STRUCTURED" | "FLEXIBLE" | "BOTH"
+  preferredStudyTimes String? // JSON array: MORNING | AFTERNOON | EVENING | NIGHT
+  wantsReminders      Boolean @default(true)
+  dailyGoalQuestions  Int     @default(20)
+  planIntensity       String  @default("BALANCED") // "AGGRESSIVE" | "BALANCED" | "LIGHT"
+  diagnosticChoice    String? // "TAKE_NOW" | "LATER" | legacy: "TAKE_TEST_1" | "SKIP_AND_PRACTICE"
 
-  onboardingComplete Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  onboardingComplete Boolean  @default(false)
+  onboardingStep     Int      @default(0) // resume point for a partially-finished stepper
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model Settings {
@@ -71,9 +90,9 @@ model Settings {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  theme            String  @default("light")
-  defaultTimerSecs Int     @default(75) // default seconds per question in timed mode
-  aiEnabled        Boolean @default(true) // user-level toggle (server still gates on env)
+  theme            String   @default("light")
+  defaultTimerSecs Int      @default(75) // default seconds per question in timed mode
+  aiEnabled        Boolean  @default(true) // user-level toggle (server still gates on env)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -89,17 +108,25 @@ model Question {
   // idempotent re-import. Unique when present.
   externalId String? @unique
 
-  section    String // "READING_WRITING" | "MATH"
-  domain     String // see taxonomy.ts (e.g. "Algebra", "Craft and Structure")
-  skill      String // subtopic / skill (e.g. "Linear equations in one variable")
-  difficulty String // "EASY" | "MEDIUM" | "HARD"
+  section      String // "READING_WRITING" | "MATH"
+  domain       String // see taxonomy.ts (e.g. "Algebra", "Craft and Structure")
+  skill        String // subtopic / skill (e.g. "Linear equations in one variable")
+  subskill     String? // finer-grained tag (e.g. "Slope interpretation in context")
+  difficulty   String // "EASY" | "MEDIUM" | "HARD"
   questionType String? // free-form descriptor (e.g. "MCQ", "SPR", "Transitions")
+
+  // Structured study metadata (see src/lib/questionMeta.ts for how these are derived).
+  satRelevance          String  @default("MEDIUM") // "HIGH" | "MEDIUM" | "LOW" — how often this shows up
+  sourceType            String  @default("OFFICIAL_STYLE") // "OFFICIAL_STYLE" | "CURATED" | "AI_GENERATED"
+  calculatorAppropriate Boolean @default(false) // is reaching for Desmos actually a good idea here
+  timeRecommendationSec Int? // target pace for this item
+  isDiagnostic          Boolean @default(false) // reserved for the score predictor; hidden from practice
 
   format String @default("MCQ") // "MCQ" | "SPR" (student-produced response)
 
   // Content. Stored as text that may contain inline LaTeX delimited by $...$.
-  stimulus    String? // passage / data setup / table context (may be long)
-  stem        String // the actual question prompt
+  stimulus      String? // passage / data setup / table context (may be long)
+  stem          String // the actual question prompt
   correctAnswer String // "A"/"B"/"C"/"D" for MCQ; literal value/range for SPR
 
   // Official explanations — the source of truth. AI may rephrase but never override.
@@ -126,24 +153,27 @@ model Question {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  choices  AnswerChoice[]
-  attempts QuestionAttempt[]
-  srsItems SrsItem[]
+  choices             AnswerChoice[]
+  attempts            QuestionAttempt[]
+  srsItems            SrsItem[]
+  diagnosticResponses DiagnosticResponse[]
 
   @@index([section])
+  @@index([section, skill])
+  @@index([isDiagnostic])
   @@index([section, domain])
   @@index([difficulty])
   @@index([reviewStatus])
 }
 
 model AnswerChoice {
-  id         String  @id @default(uuid())
+  id         String   @id @default(uuid())
   questionId String
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
-  label        String // "A" | "B" | "C" | "D"
-  content      String // choice text (may contain inline LaTeX)
-  isCorrect    Boolean @default(false)
+  label          String // "A" | "B" | "C" | "D"
+  content        String // choice text (may contain inline LaTeX)
+  isCorrect      Boolean @default(false)
   rationaleWrong String? // official explanation of why this distractor is wrong
 
   @@unique([questionId, label])
@@ -155,9 +185,9 @@ model AnswerChoice {
 // -----------------------------------------------------------------------------
 
 model QuestionAttempt {
-  id         String  @id @default(uuid())
+  id         String   @id @default(uuid())
   userId     String
-  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   questionId String
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
@@ -168,13 +198,27 @@ model QuestionAttempt {
   confidence   String? // "GUESS" | "UNSURE" | "CONFIDENT"
   isReview     Boolean @default(false) // true when this attempt came from the SRS queue
 
+  // Behavioral signals used by the mistake analyzer.
+  flagged       Boolean @default(false) // marked for review during the session
+  answerChanges Int     @default(0) // how many times the selection changed before submit
+  sessionId     String? // DiagnosticSession.id when this attempt came from the predictor
+  stage         String? // "ROUTING" | "ADAPTIVE" for diagnostic attempts
+
+  // Error-log workflow state (works even without a written reflection).
+  resolved   Boolean   @default(false)
+  resolvedAt DateTime?
+  note       String? // the student's own note on this miss
+
   createdAt DateTime @default(now())
 
-  errorLog ErrorLog?
+  errorLog  ErrorLog?
+  diagnosis MistakeDiagnosis?
 
   @@index([userId])
   @@index([userId, questionId])
   @@index([userId, createdAt])
+  @@index([userId, isCorrect])
+  @@index([sessionId])
 }
 
 model ErrorLog {
@@ -184,21 +228,22 @@ model ErrorLog {
   userId    String
   user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  chosenAnswer     String
-  correctAnswer    String
-  whyChose         String // why I picked my answer
-  whyWrong         String // why my answer was wrong
-  whyCorrectRight  String // why the correct answer is right
-  mistakeType      String // see taxonomy.ts MISTAKE_TYPES
-  whatDifferent    String // what I'll do differently next time
-  confidenceAfter  String // "LOW" | "MEDIUM" | "HIGH"
+  chosenAnswer    String
+  correctAnswer   String
+  whyChose        String // why I picked my answer
+  whyWrong        String // why my answer was wrong
+  whyCorrectRight String // why the correct answer is right
+  mistakeType     String // see taxonomy.ts MISTAKE_TYPES
+  whatDifferent   String // what I'll do differently next time
+  confidenceAfter String // "LOW" | "MEDIUM" | "HIGH"
 
   // AI review of the *quality* of this reflection (Phase 5). Until a key is
   // configured, aiReviewStatus stays "NOT_REVIEWED" and the gate uses
   // completeness validation only.
-  aiReviewStatus String @default("NOT_REVIEWED") // NOT_REVIEWED | PENDING | APPROVED | NEEDS_REVISION
+  aiReviewStatus String  @default("NOT_REVIEWED") // NOT_REVIEWED | PENDING | APPROVED | NEEDS_REVISION
   aiFeedback     String?
-  revisionCount  Int    @default(0)
+  revisionCount  Int     @default(0)
+  source         String  @default("practice") // "practice" | "diagnostic"
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -235,12 +280,12 @@ model SrsItem {
   questionId String
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
-  intervalIndex     Int      @default(0) // index into the interval ladder (see srs.ts)
-  dueDate           DateTime // when this item is next due
-  lastResult        String? // "CORRECT" | "INCORRECT"
-  consecutiveCorrect Int     @default(0)
-  active            Boolean  @default(true) // false once "graduated" past the ladder
-  lapses            Int      @default(0)
+  intervalIndex      Int      @default(0) // index into the interval ladder (see srs.ts)
+  dueDate            DateTime // when this item is next due
+  lastResult         String? // "CORRECT" | "INCORRECT"
+  consecutiveCorrect Int      @default(0)
+  active             Boolean  @default(true) // false once "graduated" past the ladder
+  lapses             Int      @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -260,12 +305,12 @@ model StudyPlan {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Human-readable summary + phase, regenerated as performance changes.
-  summary   String?
-  phase     String? // DIAGNOSTIC | SKILL_BUILDING | TOPIC_MASTERY | TIMED_PRACTICE | FULL_TEST | FINAL_REVIEW
-  generatedBy String @default("rule-based") // "rule-based" | "ai"
-  active    Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  summary     String?
+  phase       String? // DIAGNOSTIC | SKILL_BUILDING | TOPIC_MASTERY | TIMED_PRACTICE | FULL_TEST | FINAL_REVIEW
+  generatedBy String   @default("rule-based") // "rule-based" | "ai"
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   tasks StudyPlanTask[]
 
@@ -273,17 +318,17 @@ model StudyPlan {
 }
 
 model StudyPlanTask {
-  id     String @id @default(uuid())
+  id     String    @id @default(uuid())
   planId String
   plan   StudyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   title       String
   description String?
-  cadence     String @default("weekly") // "daily" | "weekly"
+  cadence     String    @default("weekly") // "daily" | "weekly"
   forDate     DateTime? // for daily tasks
   section     String? // optional focus section
-  done        Boolean @default(false)
-  orderIndex  Int     @default(0)
+  done        Boolean   @default(false)
+  orderIndex  Int       @default(0)
 
   @@index([planId])
 }
@@ -295,8 +340,8 @@ model PracticeTestSchedule {
 
   testLabel    String // e.g. "Official Practice Test 1 (Bluebook)"
   scheduledFor DateTime
-  kind         String  @default("FULL") // "DIAGNOSTIC" | "FULL"
-  completed    Boolean @default(false)
+  kind         String   @default("FULL") // "DIAGNOSTIC" | "FULL"
+  completed    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
   @@index([userId, scheduledFor])
@@ -307,13 +352,13 @@ model PracticeTestResult {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  testLabel  String
-  takenOn    DateTime @default(now())
-  totalScore Int?
-  mathScore  Int?
-  rwScore    Int?
+  testLabel        String
+  takenOn          DateTime @default(now())
+  totalScore       Int?
+  mathScore        Int?
+  rwScore          Int?
   missedCategories String? // JSON array of category strings the student knows they missed
-  notes      String?
+  notes            String?
 
   @@index([userId, takenOn])
 }
@@ -327,16 +372,229 @@ model TopicMastery {
   domain  String
   skill   String
 
-  attempts   Int   @default(0)
-  correct    Int   @default(0)
+  attempts      Int       @default(0)
+  correct       Int       @default(0)
   // Simple trend signal: rolling accuracy over recent attempts (0..1), and the
   // previous value so the dashboard can show improving/declining.
-  accuracy       Float @default(0)
-  prevAccuracy   Float @default(0)
-  lastAttemptAt  DateTime?
+  accuracy      Float     @default(0)
+  prevAccuracy  Float     @default(0)
+  lastAttemptAt DateTime?
+
+  // Difficulty-split counters feed the mastery model (see src/lib/mastery.ts).
+  easyAttempts   Int @default(0)
+  easyCorrect    Int @default(0)
+  mediumAttempts Int @default(0)
+  mediumCorrect  Int @default(0)
+  hardAttempts   Int @default(0)
+  hardCorrect    Int @default(0)
+
+  // Difficulty-weighted, recency-decayed mastery estimate in 0..1.
+  mastery     Float   @default(0)
+  prevMastery Float   @default(0)
+  avgTimeMs   Int?
+  // JSON array of the most recent results, newest last:
+  // [{ "c": true, "d": "HARD", "t": 51230 }, ...] capped at 20 entries.
+  recentJson  String?
+  // Derived label — see classifySignal() in src/lib/mastery.ts.
+  signal      String? // STRONG | IMPROVING | HARD_ONLY | TIMING | CARELESS | CONCEPT_GAP | UNTESTED
 
   updatedAt DateTime @updatedAt
 
   @@unique([userId, section, domain, skill])
   @@index([userId, section])
+  @@index([userId, mastery])
+}
+
+// -----------------------------------------------------------------------------
+// Score-predictor diagnostic
+// -----------------------------------------------------------------------------
+
+model DiagnosticSession {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status      String    @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED | ABANDONED
+  startedAt   DateTime  @default(now())
+  submittedAt DateTime?
+
+  // Resume state so a refresh never loses progress.
+  currentIndex Int     @default(0)
+  // JSON snapshot of the resolved form: ordered slots with questionId, section,
+  // stage and difficulty. Written once at start, extended when a track is chosen.
+  formJson     String
+  // Adaptive tracks chosen after each section's routing stage ("HARD" | "MEDIUM" | "EASY").
+  mathTrack    String?
+  rwTrack      String?
+
+  updatedAt DateTime @updatedAt
+
+  responses DiagnosticResponse[]
+  result    DiagnosticResult?
+
+  @@index([userId, status])
+}
+
+model DiagnosticResponse {
+  id        String            @id @default(uuid())
+  sessionId String
+  session   DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  orderIndex Int
+  section    String // MATH | READING_WRITING
+  stage      String // ROUTING | ADAPTIVE
+
+  chosenAnswer  String?
+  isCorrect     Boolean?
+  timeMs        Int       @default(0) // cumulative dwell time across visits
+  visits        Int       @default(0)
+  answerChanges Int       @default(0)
+  flagged       Boolean   @default(false)
+  answeredAt    DateTime?
+
+  @@unique([sessionId, questionId])
+  @@index([sessionId, orderIndex])
+}
+
+model DiagnosticResult {
+  id        String            @id @default(uuid())
+  sessionId String            @unique
+  session   DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  mathScore  Int // 200–800
+  rwScore    Int // 200–800
+  totalScore Int // 400–1600
+
+  mathLow   Int
+  mathHigh  Int
+  rwLow     Int
+  rwHigh    Int
+  totalLow  Int
+  totalHigh Int
+
+  // Latent ability estimates + standard errors from the scoring model.
+  mathTheta Float
+  mathSe    Float
+  rwTheta   Float
+  rwSe      Float
+
+  confidence    String // LOW | MODERATE | HIGH
+  accuracyPct   Float
+  // JSON: domains, skills, timing, strengths, weaknesses, flags. See
+  // DiagnosticBreakdown in src/lib/diagnostic/scoring.ts.
+  breakdownJson String
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Why a question was most likely missed. One row per missed attempt.
+model MistakeDiagnosis {
+  id        String          @id @default(uuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attemptId String          @unique
+  attempt   QuestionAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  category    String // see MISTAKE_CATEGORIES in src/lib/diagnostic/mistakes.ts
+  confidence  Float   @default(0.5) // how sure the classifier is, 0..1
+  testing     String // what the question was testing
+  whyWrong    String // why the student's answer is incorrect
+  whyCorrect  String // why the correct answer works
+  lesson      String // concise takeaway
+  nextStep    String // recommended next action
+  similarJson String? // JSON array of similar question types to practice
+
+  source       String  @default("heuristic") // heuristic | ai
+  model        String?
+  userFeedback String? // ACCURATE | INACCURATE — student rating of this diagnosis
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, category])
+}
+
+// -----------------------------------------------------------------------------
+// Recommendations & daily plan
+// -----------------------------------------------------------------------------
+
+model SkillRecommendation {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  section String
+  domain  String
+  skill   String
+
+  priority      Int // 1 = highest
+  priorityLabel String // CRITICAL | HIGH | MEDIUM | LOW
+  reason        String // plain-language justification
+  signal        String // CARELESS | CONCEPT_GAP | TIMING | HARD_ONLY | IMPROVING | STRONG | UNTESTED
+
+  currentMastery        Float
+  targetMastery         Float
+  recommendedQuestions  Int
+  estimatedMinutes      Int
+  recommendedDifficulty String // EASY | MEDIUM | HARD | MIXED
+
+  status String @default("ACTIVE") // ACTIVE | DONE | DISMISSED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, section, skill])
+  @@index([userId, status, priority])
+}
+
+model StudyPlanDay {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date            DateTime // midnight local, one row per calendar day
+  weekIndex       Int // 0 = current week
+  kind            String // SKILL | MIXED | TIMED | FULL_TEST | ERROR_REVIEW | LIGHT | REST | FINAL_WEEK | TEST_DAY
+  title           String
+  // JSON array of assignments:
+  // [{ "label": "...", "section": "MATH", "skill": "...", "questions": 12, "minutes": 20, "href": "..." }]
+  itemsJson       String
+  targetMinutes   Int      @default(0)
+  targetQuestions Int      @default(0)
+
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+// -----------------------------------------------------------------------------
+// AI tutor transcript
+// -----------------------------------------------------------------------------
+
+model TutorMessage {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  threadKey String   @default("main") // "main" or "question:<questionId>"
+  role      String // user | assistant
+  mode      String? // TEACH | HINT | CHECK | SIMILAR | EXPLAIN_MISTAKE | QUIZ | PLAN
+  content   String
+  // Optional structured payload (e.g. a generated question) as JSON.
+  dataJson  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, threadKey, createdAt])
 }
