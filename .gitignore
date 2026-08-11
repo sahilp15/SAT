@@ -44,3 +44,7 @@ next-env.d.ts
 # Extracted question figures
 /public/question-assets/*
 !/public/question-assets/.gitkeep
+
+# Python bytecode from scripts/authoring
+__pycache__/
+*.pyc

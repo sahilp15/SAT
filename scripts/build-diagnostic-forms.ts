@@ -65,19 +65,45 @@ const OUT_FILE = path.resolve(__dirname, "../src/lib/diagnostic/forms.generated.
 const FIGURE_REF =
   /\b(shown|graphed|scatterplot|histogram|the figure|the diagram|number line)\b/i;
 
-/** Signatures of PDF-extraction damage, checked against math text only. */
+/**
+ * Signatures of PDF-extraction damage, checked against math text only.
+ *
+ * The intra-expression rules run LINE BY LINE, not across the whole string.
+ * They use \s, which matches a newline, and a displayed system of equations is
+ * written one equation per line:
+ *
+ *     3x + 2y = 19
+ *     5x - 4y = 17
+ *
+ * Run across the full string, `\d\s+\d` reads the join between "19" and "5x" as
+ * a vanished fraction bar and rejects a perfectly clean item. Damage from a real
+ * text extraction ("6 7", "x2", "c s(Q)") always occurs *within* one line, so
+ * splitting first loses no detection.
+ */
 function hasExtractionDamage(text: string): boolean {
-  // "x2" where an exponent was dropped, "6 7" where a fraction bar vanished,
-  // "c s(Q)" where "cos(Q)" lost letters, a stray exponent on its own line.
-  if (/[a-zA-Z]\d/.test(text)) return true;
-  if (/\d\s+\d/.test(text)) return true;
-  if (/\d\s+[a-z](?![a-z])/.test(text)) return true;
-  if (/[+\-*/(]\s*=|=\s*[)*/+]/.test(text)) return true;
-  if (/\b[a-z]\s+[a-z]?\s*\(/.test(text)) return true;
-  if (/^\s*\d+\s*$/m.test(text)) return true;
   if (text.includes("  ")) return true;
   if ((text.match(/\(/g) ?? []).length !== (text.match(/\)/g) ?? []).length) return true;
+  return text.split("\n").some(lineHasExtractionDamage);
+}
+
+function lineHasExtractionDamage(line: string): boolean {
+  // "x2" where an exponent was dropped, "6 7" where a fraction bar vanished,
+  // "c s(Q)" where "cos(Q)" lost letters.
+  if (/[a-zA-Z]\d/.test(line)) return true;
+  if (/\d\s+\d/.test(line)) return true;
+  if (/\d\s+[a-z](?![a-z])/.test(line)) return true;
+  if (/[+\-*/(]\s*=|=\s*[)*/+]/.test(line)) return true;
+  if (/\b[a-z]\s+[a-z]?\s*\(/.test(line)) return true;
   return false;
+}
+
+/**
+ * A line holding nothing but a number is a stray exponent that lost its base.
+ * This is a STEM-only rule: an answer choice is very often just a number, and
+ * applying it to choices rejects most numeric multiple-choice items.
+ */
+function hasOrphanedNumberLine(stem: string): boolean {
+  return /^\s*\d+\s*$/m.test(stem);
 }
 
 function isEligible(q: BankQuestion): boolean {
@@ -103,6 +129,7 @@ function isEligible(q: BankQuestion): boolean {
   }
 
   if (q.section === "MATH" && texts.some(hasExtractionDamage)) return false;
+  if (q.section === "MATH" && hasOrphanedNumberLine(stem)) return false;
   return true;
 }
 

@@ -248,15 +248,25 @@ describe("every referenced question is present and well formed", () => {
     }
   });
 
+  // Mirrors the quality filter in scripts/build-diagnostic-forms.ts. Two rules
+  // there are narrower than a naive whole-string scan, and this has to match or
+  // it fails clean items the generator correctly admitted:
+  //   - intra-expression damage is checked per line, because a displayed system
+  //     of equations puts a newline between "= 19" and "5x - 4y", which \s
+  //     matches;
+  //   - an all-digit line means a stray exponent only in a STEM. An answer
+  //     choice is very often just a number.
   it("never carries PDF-extraction damage in a Math item", () => {
-    const damage = [/[a-zA-Z]\d/, /\d\s+\d/, /[+\-*/(]\s*=/, /^\s*\d+\s*$/m];
+    const damage = [/[a-zA-Z]\d/, /\d\s+\d/, /[+\-*/(]\s*=/];
     for (const id of unique) {
       const q = bank.get(id);
       if (!q || q.section !== "MATH") continue;
       const texts = [q.stem, ...q.choices.map((c) => c.content)];
+      const lines = texts.flatMap((t) => t.split("\n"));
       for (const pattern of damage) {
-        expect(texts.some((t) => pattern.test(t)), `${id} matches ${pattern}`).toBe(false);
+        expect(lines.some((l) => pattern.test(l)), `${id} matches ${pattern}`).toBe(false);
       }
+      expect(/^\s*\d+\s*$/m.test(q.stem), `${id} has an orphaned number line`).toBe(false);
     }
   });
 });
