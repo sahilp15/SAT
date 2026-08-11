@@ -10,9 +10,35 @@
 // built on this blueprint therefore measure the same thing, the same way, which
 // is exactly how real test forms work.
 //
-// Slot order matters. The routing stage ramps EASY -> EASY -> MEDIUM -> MEDIUM
-// -> HARD so a student meets an accessible question first, and the three
+// Slot order matters. The routing stage ramps EASY -> MEDIUM -> MEDIUM -> HARD
+// -> HARD so a student still meets an accessible question first, and the three
 // adaptive tracks are strictly ordered by average difficulty.
+//
+// DIFFICULTY LEVEL OF THIS BLUEPRINT
+// ----------------------------------
+// The mix was raised across routing and the EASY/MEDIUM tracks so the
+// instrument measures where the current exam actually discriminates. Mean slot
+// difficulty (EASY=0, MEDIUM=1, HARD=2), before -> after:
+//
+//               routing   EASY track   MEDIUM track   HARD track
+//   Math          0.8 -> 1.2   0.6 -> 0.8    1.2 -> 1.4    2.0 (unchanged)
+//   R&W           0.8 -> 1.2   0.2 -> 0.8    1.2 -> 1.4    2.0 (unchanged)
+//
+// Two things this deliberately does NOT do. The HARD track is already every
+// slot at the top of the three-level taxonomy, so it cannot be raised further
+// without a fourth difficulty tier — that is the ceiling of this scale, not an
+// oversight. And the EASY track keeps two EASY anchors: students routed there
+// are the ones whose foundations are in question, and a track they get entirely
+// wrong yields no information about *which* fundamentals are missing.
+//
+// R&W's EASY track moved the most (0.2 -> 0.8) because it was also the most out
+// of step with Math's, which made the two sections' foundations tracks measure
+// at noticeably different difficulties. They now match.
+//
+// Raising routing changes what a given weighted ratio implies about ability, so
+// the track thresholds in routing.ts were re-derived against this blueprint.
+// Change one and you must re-derive the other; routing.test.ts pins the
+// resulting boundaries.
 
 import type { Difficulty, Section } from "../taxonomy";
 
@@ -53,9 +79,9 @@ const s = (domain: string, difficulty: Difficulty): BlueprintSlot => ({ domain, 
 const MATH_BLUEPRINT: SectionBlueprint = {
   routing: [
     s(ALGEBRA, "EASY"),
-    s(ADVANCED, "EASY"),
+    s(ADVANCED, "MEDIUM"),
     s(ALGEBRA, "MEDIUM"),
-    s(GEOMETRY, "MEDIUM"),
+    s(GEOMETRY, "HARD"),
     s(PSDA, "HARD"),
   ],
   tracks: {
@@ -64,21 +90,21 @@ const MATH_BLUEPRINT: SectionBlueprint = {
       s(ADVANCED, "EASY"),
       s(ALGEBRA, "MEDIUM"),
       s(GEOMETRY, "MEDIUM"),
-      s(PSDA, "MEDIUM"),
+      s(ALGEBRA, "HARD"),
     ],
     MEDIUM: [
       s(ALGEBRA, "MEDIUM"),
       s(ADVANCED, "MEDIUM"),
       s(GEOMETRY, "MEDIUM"),
-      s(ALGEBRA, "MEDIUM"),
+      s(ADVANCED, "HARD"),
       s(ALGEBRA, "HARD"),
     ],
     HARD: [
       s(ALGEBRA, "HARD"),
       s(ADVANCED, "HARD"),
       s(GEOMETRY, "HARD"),
+      s(PSDA, "HARD"),
       s(ADVANCED, "HARD"),
-      s(ALGEBRA, "HARD"),
     ],
   },
 };
@@ -87,24 +113,24 @@ const MATH_BLUEPRINT: SectionBlueprint = {
 const RW_BLUEPRINT: SectionBlueprint = {
   routing: [
     s(CRAFT, "EASY"),
-    s(INFO, "EASY"),
+    s(INFO, "MEDIUM"),
     s(CONVENTIONS, "MEDIUM"),
-    s(EXPRESSION, "MEDIUM"),
+    s(EXPRESSION, "HARD"),
     s(INFO, "HARD"),
   ],
   tracks: {
     EASY: [
       s(CRAFT, "EASY"),
       s(CONVENTIONS, "EASY"),
-      s(INFO, "EASY"),
-      s(EXPRESSION, "EASY"),
-      s(CRAFT, "MEDIUM"),
+      s(INFO, "MEDIUM"),
+      s(EXPRESSION, "MEDIUM"),
+      s(CRAFT, "HARD"),
     ],
     MEDIUM: [
       s(CONVENTIONS, "MEDIUM"),
       s(INFO, "MEDIUM"),
       s(EXPRESSION, "MEDIUM"),
-      s(CRAFT, "MEDIUM"),
+      s(CRAFT, "HARD"),
       s(CONVENTIONS, "HARD"),
     ],
     HARD: [

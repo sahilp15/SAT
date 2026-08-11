@@ -49,12 +49,29 @@ export interface RoutingDecision {
 }
 
 // Thresholds on the weighted ratio. Chosen so that:
-//   - clearing the two hard/medium items plus the easy ones routes HARD,
+//   - clearing the harder items plus the accessible ones routes HARD,
 //   - roughly half credit routes MEDIUM,
-//   - missing the easy items routes EASY, where cheaper items will actually
-//     discriminate between "shaky" and "hasn't learned it".
-export const HARD_TRACK_THRESHOLD = 0.7;
-export const MEDIUM_TRACK_THRESHOLD = 0.4;
+//   - missing the accessible items routes EASY, where cheaper items will
+//     actually discriminate between "shaky" and "hasn't learned it".
+//
+// These are DERIVED, not picked. The ratio divides by the routing stage's total
+// available credit, so it moves whenever the routing slots change: a harder
+// routing stage earns a lower ratio from the same student, which would quietly
+// route everyone downward if the thresholds stood still — the opposite of what
+// raising the difficulty is for.
+//
+// So the thresholds are set to hold the *ability* boundaries fixed across the
+// blueprint change. Under the same Rasch difficulties the scoring model uses
+// (EASY -1.0, MEDIUM 0.0, HARD +1.1), the old routing stage
+// (EASY/EASY/MEDIUM/MEDIUM/HARD) crossed 0.70 at theta = 1.32 and 0.40 at
+// theta = 0.13 — about 680 and 535 in section-score terms. The current routing
+// stage (EASY/MEDIUM/MEDIUM/HARD/HARD) reaches those same abilities at 0.638
+// and 0.334, which is where the constants below come from.
+//
+// If the routing slots in blueprint.ts change again, re-derive these the same
+// way rather than nudging them by feel.
+export const HARD_TRACK_THRESHOLD = 0.64;
+export const MEDIUM_TRACK_THRESHOLD = 0.33;
 
 /**
  * Decide which adaptive track follows a section's routing stage.
